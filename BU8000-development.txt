@@ -1,0 +1,6 @@
+BU8000 embedded PGS development record
+
+2026-11-14: migrated the device-validated Litefin no-store policy to the same MKV subtitle Range fetch in Moonfin. Native video playback and the libpgs decoder are unchanged.
+Removed the unbounded outer per-cue retry added in the previous customization. The existing three-attempt request budget and body timeout remain; a persistently unavailable cue may be skipped so later subtitles can continue.
+Regression validation: two new tests failed before the fix; four related suites and 74 tests pass after it. Signed TV deployment and continuous/seek acceptance are pending.
+The preceding commit preserves the previously installed customization for comparison; its PGS device acceptance had failed. It is not a known-good subtitle baseline.

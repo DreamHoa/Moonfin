@@ -142,8 +142,8 @@ export const initPgsCanvasRenderer = async (canvasElement, subtitleStream) => {
 /** The canvas equivalent of the webOS in-band reader, driven by AVPlay's clock. */
 export const initPgsCanvasInBandRenderer = async (canvasElement, subtitleStream, startTime = 0) => {
 	if (!subtitleStream?.inBand || !canvasElement) return null;
-	window.__moonfinMkvBuild = '20261114.2';
-	console.info('[Tizen MKV] PGS build 20261114.2, start:', startTime);
+	window.__moonfinMkvBuild = '20261114.3-cache';
+	console.info('[Tizen MKV] PGS build 20261114.3-cache, start:', startTime);
 	const clock = {time: startTime, offset: 0};
 	const source = createInBandPgsSource({
 		streamUrl: subtitleStream.inBand.streamUrl,

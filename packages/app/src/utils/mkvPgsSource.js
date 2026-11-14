@@ -364,7 +364,8 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 	};
 
 	const requestRange = async (start, end, signal) => {
-		const response = await fetch(streamUrl, {headers: {Range: `bytes=${start}-${end}`}, signal});
+		// Native video uses this URL too; the TV HTTP cache serializes overlapping ranges.
+		const response = await fetch(streamUrl, {headers: {Range: `bytes=${start}-${end}`}, cache: 'no-store', signal});
 		if (response.status === 206) return new Uint8Array(await response.arrayBuffer());
 		discard(response);
 		throw Object.assign(new Error(`range request not honoured: ${response.status}`), {status: response.status});
@@ -502,20 +503,13 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 	};
 
 	const readCue = async (cue) => {
-		while (!disposed) {
-			try {
-				return toSupFrames(await readAccessUnit(cue));
-			} catch (err) {
-				if (!err.transient) {
-					console.warn('[PgsRenderer] Skipped malformed in-band subtitle at', cue.time * timestampScale, err);
-					return [];
-				}
-				// Retain this cue and its ordering across a temporary connection failure.
-				console.warn('[PgsRenderer] Retrying in-band subtitle at', cue.time * timestampScale, err);
-				await delay(RETRY_DELAY_MS);
-			}
+		try {
+			return toSupFrames(await readAccessUnit(cue));
+		} catch (err) {
+			// fetchRange already retries. One unavailable cue must not stall the entire batch forever.
+			console.warn('[PgsRenderer] Skipped unavailable in-band subtitle at', cue.time * timestampScale, err);
+			return [];
 		}
-		return [];
 	};
 
 	const readBatch = async (targetMs) => {

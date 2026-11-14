@@ -357,6 +357,38 @@ describe('mkvPgsSource', () => {
 		warn.mockRestore();
 	});
 
+	test('bypasses the HTTP cache for subtitle ranges sharing the native video URL', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000], fillerBytes: 32}));
+		const source = openSource({lookaheadSeconds: 10});
+		try {
+			expect(await source.ready).toBe(true);
+			await readAll(source);
+			expect(global.fetch.mock.calls.length).toBeGreaterThan(3);
+			for (const [, init] of global.fetch.mock.calls) expect(init.cache).toBe('no-store');
+		} finally { source.dispose(); }
+	});
+
+	test('a persistently failing cue does not block later subtitles indefinitely', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32}));
+		const fetchFile = global.fetch;
+		const source = openSource({lookaheadSeconds: 10});
+		expect(await source.ready).toBe(true);
+		let blockedRange;
+		global.fetch = jest.fn(async (url, init) => {
+			const match = /bytes=(\d+)-(\d+)/.exec(init.headers.Range);
+			if (!blockedRange && Number(match[2]) - Number(match[1]) === 63) blockedRange = init.headers.Range;
+			if (init.headers.Range === blockedRange) return {status: 503};
+			return fetchFile(url, init);
+		});
+		const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+		let timer;
+		try {
+			const bytes = await Promise.race([readAll(source), new Promise(resolve => { timer = setTimeout(() => resolve(null), 1800); })]);
+			expect(bytes).not.toBeNull();
+			expect([...new Set(ptsOf(bytes))]).toEqual([2000 * 90, 3000 * 90]);
+		} finally { clearTimeout(timer); source.dispose(); warn.mockRestore(); }
+	});
+
 	test('retries a range request the server failed once', async () => {
 		serveFile(buildFile({subtitleTimes: [1000], fillerBytes: 32}), {failFirstWith: 503});
 		const source = openSource();
@@ -383,7 +415,7 @@ describe('mkvPgsSource', () => {
 			const range = init.headers.Range;
 			const [, start, end] = /bytes=(\d+)-(\d+)/.exec(range);
 			if (!failedRange && Number(end) - Number(start) === 63 && fetchFile.mock.calls.length > 5) failedRange = range;
-			if (range === failedRange && failures++ < 3) {
+			if (range === failedRange && failures++ < 2) {
 				return {...response, arrayBuffer: async () => { throw new Error('connection reset during body'); }};
 			}
 			return response;
@@ -391,7 +423,7 @@ describe('mkvPgsSource', () => {
 		const source = openSource({lookaheadSeconds: 10});
 		expect(await source.ready).toBe(true);
 		expect([...new Set(ptsOf(await readAll(source)))]).toEqual([1000 * 90, 2000 * 90, 3000 * 90]);
-		expect(failures).toBeGreaterThan(3);
+		expect(failures).toBe(3);
 	});
 
 	test('times out a stalled response body and retries it', async () => {
