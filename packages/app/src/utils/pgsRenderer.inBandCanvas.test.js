@@ -49,6 +49,19 @@ test('releases the source when the MKV has no readable subtitle cues', async () 
 	expect(PgsRenderer).not.toHaveBeenCalled();
 });
 
+test('publishes an already decoded timeline before drawing when libpgs progress is throttled', async () => {
+	const times = [5 * 90000, 10 * 90000];
+	const impl = {pgs: {updateTimestamps: times}, updateTimestamps: []};
+	impl.invokeTimestampsUpdate = jest.fn(() => { impl.updateTimestamps = impl.pgs.updateTimestamps; });
+	native.implementation = impl;
+	const view = await initPgsCanvasInBandRenderer({}, track, 5);
+	native.renderAtTimestamp.mockImplementation(() => { expect(impl.updateTimestamps).toBe(times); });
+	view.renderAtTimestamp(5);
+	view.renderAtTimestamp(6);
+	expect(impl.invokeTimestampsUpdate).toHaveBeenCalledTimes(1);
+	view.dispose();
+});
+
 test('restores fetch and releases the source when libpgs cannot start', async () => {
 	const fetchBefore = global.fetch;
 	const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});

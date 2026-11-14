@@ -61,7 +61,8 @@ const SUBTITLE_TRACK_TYPE = 17;
 const SUP_FRAME_HEADER_BYTES = 10;
 const SUP_PTS_UNITS_PER_MS = 90;
 const HEAD_BYTES = 64 * 1024;
-const BLOCK_PROBE_BYTES = 64;
+// A typical PGS display set fits in one bounded read, avoiding a probe/tail round trip.
+const BLOCK_PROBE_BYTES = 32 * 1024;
 const MAX_CUES_PER_BATCH = 64;
 const READ_CONCURRENCY = 4;
 const POLL_INTERVAL_MS = 100;
@@ -354,6 +355,7 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 	let disposed = false;
 	let compressionAlgorithm = null;
 	let compressionSettings = null;
+	let preparedUnit = null;
 	const clusterDataOffsets = new Map();
 
 	const cueMs = (index) => cues[index].time * timestampScale;
@@ -480,6 +482,14 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		return accessUnitToSup(unit.timeMs, payload);
 	};
 
+	// Put the cursor on the last cue at or before the target, including its clear composition.
+	const arm = (targetMs) => {
+		let index = 0;
+		while (index < cues.length && cueMs(index) <= targetMs) index++;
+		nextCue = Math.max(0, index - 1);
+		servedFromMs = cues.length ? Math.min(cueMs(nextCue), targetMs) : targetMs;
+	};
+
 	const prepare = async () => {
 		header = parseHeader(await fetchRange(0, HEAD_BYTES - 1));
 		if (!header.tracks.length || header.cuesOffset === null) return false;
@@ -498,11 +508,19 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		if (!cues.length || cues.some((cue) => cue.relativePosition === null)) return false;
 		// Read one access unit up front, so a layout this reader gets wrong falls back before anything shows.
 		// mkvmerge and FFmpeg put a whole display set in each block, so it has to end with the end segment.
-		const frames = toSupFrames(await readAccessUnit(cues[0]));
+		arm(Math.max(0, startTime || 0) * 1000);
+		const preparedCue = cues[nextCue];
+		const frames = toSupFrames(await readAccessUnit(preparedCue));
+		preparedUnit = {cue: preparedCue, frames};
 		return frames.length > 0 && frames[frames.length - 1][SUP_FRAME_HEADER_BYTES] === PGS_END_SEGMENT;
 	};
 
 	const readCue = async (cue) => {
+		if (preparedUnit?.cue === cue) {
+			const frames = preparedUnit.frames;
+			preparedUnit = null;
+			return frames;
+		}
 		try {
 			return toSupFrames(await readAccessUnit(cue));
 		} catch (err) {
@@ -512,7 +530,7 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		}
 	};
 
-	const readBatch = async (targetMs) => {
+	const readBatch = async (targetMs, controller) => {
 		const batch = [];
 		while (nextCue < cues.length && batch.length < MAX_CUES_PER_BATCH && cueMs(nextCue) <= targetMs) {
 			batch.push(cues[nextCue++]);
@@ -521,26 +539,23 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		// the prefetch window now, rather than waiting until the final prefetched cue is due.
 		if (batch.length && nextCue < cues.length) batch.push(cues[nextCue++]);
 		if (!batch.length) return null;
-		const frames = [];
+		let delivered = false;
 		for (let i = 0; i < batch.length; i += READ_CONCURRENCY) {
 			const reads = batch.slice(i, i + READ_CONCURRENCY).map(readCue);
-			for (const unitFrames of await Promise.all(reads)) frames.push(...unitFrames);
+			// Preserve timestamp order without holding current data behind future requests.
+			for (const read of reads) {
+				const frames = await read;
+				if (disposed) return delivered;
+				if (frames.length) {
+					controller.enqueue(concat(frames));
+					delivered = true;
+				}
+			}
 		}
-		return concat(frames);
+		return delivered;
 	};
 
-	// Put the cursor on the last cue at or before `targetMs`, which is the subtitle on screen there.
-	const arm = (targetMs) => {
-		let index = 0;
-		while (index < cues.length && cueMs(index) <= targetMs) index++;
-		nextCue = Math.max(0, index - 1);
-		servedFromMs = cues.length ? Math.min(cueMs(nextCue), targetMs) : targetMs;
-	};
-
-	const ready = prepare().then((ok) => {
-		if (ok) arm(Math.max(0, startTime || 0) * 1000);
-		return ok;
-	});
+	const ready = prepare();
 	// A pull that never runs would otherwise leave this rejection unhandled.
 	ready.catch(() => {});
 
@@ -562,20 +577,17 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 			const nowMs = (Number.isFinite(time) ? time : 0) * 1000;
 			// After a seek forward, everything between the cursor and the playhead is already over.
 			if (nextCue < cues.length && cueMs(nextCue) < nowMs - FORWARD_JUMP_MS) arm(nowMs);
-			const bytes = await readBatch(nowMs + lookaheadSeconds * 1000);
+			const delivered = await readBatch(nowMs + lookaheadSeconds * 1000, controller);
 			if (disposed) {
 				controller.close();
 				return;
 			}
-			if (bytes?.length) {
-				controller.enqueue(bytes);
-				return;
-			}
+			if (delivered) return;
 			if (nextCue >= cues.length) {
 				controller.close();
 				return;
 			}
-			if (!bytes) await delay(POLL_INTERVAL_MS);
+			if (!delivered) await delay(POLL_INTERVAL_MS);
 		}
 	};
 

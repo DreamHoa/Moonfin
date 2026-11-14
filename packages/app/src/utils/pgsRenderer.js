@@ -48,6 +48,11 @@ class InBandPgsRenderer {
 
 	renderAtTimestamp(time) {
 		this.clock.time = time;
+		// libpgs may parse a fast batch before its throttled progress notification.
+		const impl = this.renderer.implementation;
+		if (impl?.pgs?.updateTimestamps.length && impl.updateTimestamps !== impl.pgs.updateTimestamps) {
+			impl.invokeTimestampsUpdate();
+		}
 		this.renderer.renderAtTimestamp(time);
 	}
 
@@ -142,8 +147,8 @@ export const initPgsCanvasRenderer = async (canvasElement, subtitleStream) => {
 /** The canvas equivalent of the webOS in-band reader, driven by AVPlay's clock. */
 export const initPgsCanvasInBandRenderer = async (canvasElement, subtitleStream, startTime = 0) => {
 	if (!subtitleStream?.inBand || !canvasElement) return null;
-	window.__moonfinMkvBuild = '20261114.3-cache';
-	console.info('[Tizen MKV] PGS build 20261114.3-cache, start:', startTime);
+	window.__moonfinMkvBuild = '20261114.4-progressive';
+	console.info('[Tizen MKV] PGS build 20261114.4-progressive, start:', startTime);
 	const clock = {time: startTime, offset: 0};
 	const source = createInBandPgsSource({
 		streamUrl: subtitleStream.inBand.streamUrl,
