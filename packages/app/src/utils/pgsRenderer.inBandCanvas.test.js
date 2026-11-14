@@ -62,6 +62,15 @@ test('publishes an already decoded timeline before drawing when libpgs progress 
 	view.dispose();
 });
 
+test('clears the externally owned canvas when a seek disposes the old renderer', async () => {
+	const context = {clearRect: jest.fn()};
+	native.canvas = {width: 1920, height: 1080, getContext: () => context};
+	const view = await initPgsCanvasInBandRenderer(native.canvas, track, 120);
+	view.dispose();
+	expect(context.clearRect).toHaveBeenCalledWith(0, 0, 1920, 1080);
+	view.dispose();
+});
+
 test('restores fetch and releases the source when libpgs cannot start', async () => {
 	const fetchBefore = global.fetch;
 	const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});

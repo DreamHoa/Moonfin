@@ -58,6 +58,9 @@ class InBandPgsRenderer {
 
 	dispose() {
 		this.source.dispose();
+		// libpgs does not clear a canvas owned by the player when it is disposed.
+		const canvas = this.renderer.canvas;
+		canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
 		this.renderer.dispose();
 	}
 }
@@ -147,8 +150,8 @@ export const initPgsCanvasRenderer = async (canvasElement, subtitleStream) => {
 /** The canvas equivalent of the webOS in-band reader, driven by AVPlay's clock. */
 export const initPgsCanvasInBandRenderer = async (canvasElement, subtitleStream, startTime = 0) => {
 	if (!subtitleStream?.inBand || !canvasElement) return null;
-	window.__moonfinMkvBuild = '20261114.4-progressive';
-	console.info('[Tizen MKV] PGS build 20261114.4-progressive, start:', startTime);
+	window.__moonfinMkvBuild = '20261114.5-seek';
+	console.info('[Tizen MKV] PGS build 20261114.5-seek, start:', startTime);
 	const clock = {time: startTime, offset: 0};
 	const source = createInBandPgsSource({
 		streamUrl: subtitleStream.inBand.streamUrl,
