@@ -415,12 +415,12 @@ const extractSubtitleStreams = (mediaSource, itemId = null, creds = null, assBur
 			// server for a sidecar: the sidecar request makes Jellyfin read the whole
 			// source with ffmpeg first, which on a large remux is minutes of delay and a
 			// second full pass over the media.
-			const inBand = streamUrl && isInBandSubtitleTrack(codec, {
+			const inBand = !pgsOff && streamUrl && isInBandSubtitleTrack(codec, {
 				isExternal: s.IsExternal,
 				container: mediaSource.Container,
 				canStreamInBand: playMethod === PlayMethod.DirectPlay && canRenderEmbeddedPgsInBand()
 			}) ? {streamUrl, ordinal: inBandOrdinal} : null;
-			const inBandText = readTextInBand && directPlay && streamUrl && isMatroskaContainer(mediaSource.Container) && isEmbedDeliveredText(s) ?
+			const inBandText = readTextInBand && ['srt', 'subrip'].includes(codec) && directPlay && streamUrl && isMatroskaContainer(mediaSource.Container) && isEmbedDeliveredText(s) ?
 				{streamUrl, ordinal: inBandOrdinal, language: s.Language} : null;
 			let deliveryUrl = null;
 			if (s.DeliveryUrl) {
@@ -460,7 +460,7 @@ const extractSubtitleStreams = (mediaSource, itemId = null, creds = null, assBur
 				// comes over the API because the profile asks the server to extract it, but a
 				// server that cant transcode cant extract either, and then the copy in the
 				// container is the only one text has.
-				isEmbeddedNative: !isBurnIn && !s.IsExternal && s.DeliveryMethod !== 'External' &&
+				isEmbeddedNative: !inBand && !inBandText && !isBurnIn && !s.IsExternal && s.DeliveryMethod !== 'External' &&
 					(isImageBased || (isTextBased && mediaSource.SupportsTranscoding === false)),
 				inBand,
 				inBandText,
@@ -513,7 +513,7 @@ export const getPlaybackInfo = async (itemId, options = {}) => {
 	const serverType = options.serverType || options.item?._serverType || jellyfinApi.getServerType();
 	const storedSettings = (await getFromStorage('settings')) || {};
 	const passthroughSettings = await getPlaybackAudioSettings(options, storedSettings);
-	const embedTextSubtitles = storedSettings.webosEmbeddedTextSubtitles === true;
+	const embedTextSubtitles = isTizen() || storedSettings.webosEmbeddedTextSubtitles === true;
 	const profileOptions = {...options, passthroughSettings, embedTextSubtitles};
 	const capabilities = await getDeviceCapabilities(profileOptions);
 

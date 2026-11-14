@@ -46,6 +46,11 @@ class InBandPgsRenderer {
 		return this.source.needsRestart(time + this.clock.offset);
 	}
 
+	renderAtTimestamp(time) {
+		this.clock.time = time;
+		this.renderer.renderAtTimestamp(time);
+	}
+
 	dispose() {
 		this.source.dispose();
 		this.renderer.dispose();
@@ -130,6 +135,40 @@ export const initPgsCanvasRenderer = async (canvasElement, subtitleStream) => {
 		});
 	} catch (err) {
 		console.error('[PgsRenderer] Failed to initialize canvas renderer', err);
+		return null;
+	}
+};
+
+/** The canvas equivalent of the webOS in-band reader, driven by AVPlay's clock. */
+export const initPgsCanvasInBandRenderer = async (canvasElement, subtitleStream, startTime = 0) => {
+	if (!subtitleStream?.inBand || !canvasElement) return null;
+	window.__moonfinMkvBuild = '20261114.2';
+	console.info('[Tizen MKV] PGS build 20261114.2, start:', startTime);
+	const clock = {time: startTime, offset: 0};
+	const source = createInBandPgsSource({
+		streamUrl: subtitleStream.inBand.streamUrl,
+		subtitleOrdinal: subtitleStream.inBand.ordinal,
+		getTime: () => clock.time,
+		startTime
+	});
+	try {
+		if (!(await source.ready)) {
+			source.dispose();
+			return null;
+		}
+		const {PgsRenderer} = await import('libpgs');
+		const url = `moonfin-inband-pgs://${++streamUrlCounter}`;
+		const restore = installStreamFetch(url, source.readable);
+		let renderer;
+		try {
+			renderer = new PgsRenderer({canvas: canvasElement, subUrl: url, mode: 'mainThread'});
+		} finally {
+			restore();
+		}
+		return new InBandPgsRenderer(renderer, source, clock);
+	} catch (err) {
+		source.dispose();
+		console.warn('[PgsRenderer] In-band canvas source unavailable:', err);
 		return null;
 	}
 };

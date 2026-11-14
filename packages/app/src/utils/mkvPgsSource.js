@@ -67,6 +67,7 @@ const READ_CONCURRENCY = 4;
 const POLL_INTERVAL_MS = 100;
 const FETCH_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 500;
+const FETCH_TIMEOUT_MS = 8000;
 // How far the cursor can fall behind the playhead before it counts as a seek forward.
 const FORWARD_JUMP_MS = 5000;
 const RESTART_TOLERANCE_MS = 1000;
@@ -340,7 +341,7 @@ const inflate = (bytes) => unzlibSync(bytes);
  * track that isn't PGS or a layout this reader gets wrong shows up as a fallback rather
  * than as missing or garbage subtitles.
  */
-export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, startTime = 0, lookaheadSeconds = 15}) => {
+export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, startTime = 0, lookaheadSeconds = 15, fetchTimeoutMs = FETCH_TIMEOUT_MS}) => {
 	if (!streamUrl || typeof subtitleOrdinal !== 'number' || subtitleOrdinal < 0) return null;
 
 	let header = null;
@@ -362,25 +363,39 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		if (response.body) response.body.cancel().catch(() => {});
 	};
 
+	const requestRange = async (start, end, signal) => {
+		const response = await fetch(streamUrl, {headers: {Range: `bytes=${start}-${end}`}, signal});
+		if (response.status === 206) return new Uint8Array(await response.arrayBuffer());
+		discard(response);
+		throw Object.assign(new Error(`range request not honoured: ${response.status}`), {status: response.status});
+	};
+
+	// The deadline includes the body, which may stall after successful response headers.
+	const requestWithDeadline = (start, end) => new Promise((resolve, reject) => {
+		const controller = typeof AbortController === 'undefined' ? null : new AbortController();
+		const timer = setTimeout(() => {
+			controller?.abort();
+			reject(new Error('range request timed out'));
+		}, fetchTimeoutMs);
+		requestRange(start, end, controller?.signal).then((bytes) => {
+			clearTimeout(timer);
+			resolve(bytes);
+		}, (err) => {
+			clearTimeout(timer);
+			reject(err);
+		});
+	});
+
 	const fetchRange = async (start, end) => {
 		for (let attempt = 1; ; attempt++) {
-			let response;
 			try {
-				response = await fetch(streamUrl, {headers: {Range: `bytes=${start}-${end}`}});
+				return await requestWithDeadline(start, end);
 			} catch (err) {
-				if (attempt >= FETCH_ATTEMPTS || disposed) throw err;
-				await delay(RETRY_DELAY_MS);
-				continue;
+				const transient = !(err.status < 500);
+				if (!transient || disposed) throw err;
+				if (attempt >= FETCH_ATTEMPTS) throw Object.assign(err, {transient});
 			}
-			if (response.status === 206) return new Uint8Array(await response.arrayBuffer());
-			discard(response);
-			if (response.status >= 500 && attempt < FETCH_ATTEMPTS && !disposed) {
-				await delay(RETRY_DELAY_MS);
-				continue;
-			}
-			// A server that ignores Range answers 200 with the whole file, which would make
-			// every offset below wrong, so treat that as a hard failure.
-			throw new Error(`range request not honoured: ${response.status}`);
+			await delay(RETRY_DELAY_MS);
 		}
 	};
 
@@ -486,21 +501,35 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		return frames.length > 0 && frames[frames.length - 1][SUP_FRAME_HEADER_BYTES] === PGS_END_SEGMENT;
 	};
 
-	const readBatch = async (targetMs, nowMs) => {
+	const readCue = async (cue) => {
+		while (!disposed) {
+			try {
+				return toSupFrames(await readAccessUnit(cue));
+			} catch (err) {
+				if (!err.transient) {
+					console.warn('[PgsRenderer] Skipped malformed in-band subtitle at', cue.time * timestampScale, err);
+					return [];
+				}
+				// Retain this cue and its ordering across a temporary connection failure.
+				console.warn('[PgsRenderer] Retrying in-band subtitle at', cue.time * timestampScale, err);
+				await delay(RETRY_DELAY_MS);
+			}
+		}
+		return [];
+	};
+
+	const readBatch = async (targetMs) => {
 		const batch = [];
 		while (nextCue < cues.length && batch.length < MAX_CUES_PER_BATCH && cueMs(nextCue) <= targetMs) {
 			batch.push(cues[nextCue++]);
 		}
-		// libpgs only draws a display set once a later one is loaded, so one always sits past the playhead.
-		if (nextCue < cues.length && nextCue > 0 && cueMs(nextCue - 1) <= nowMs) batch.push(cues[nextCue++]);
+		// libpgs completes a display set when the next composition arrives. Read beyond
+		// the prefetch window now, rather than waiting until the final prefetched cue is due.
+		if (batch.length && nextCue < cues.length) batch.push(cues[nextCue++]);
 		if (!batch.length) return null;
 		const frames = [];
 		for (let i = 0; i < batch.length; i += READ_CONCURRENCY) {
-			const reads = batch.slice(i, i + READ_CONCURRENCY).map((cue) => readAccessUnit(cue).then(toSupFrames).catch((err) => {
-				// Skipping one subtitle beats erroring the stream, which stops libpgs for the rest of playback.
-				console.warn('[PgsRenderer] Skipped an in-band subtitle:', err);
-				return [];
-			}));
+			const reads = batch.slice(i, i + READ_CONCURRENCY).map(readCue);
 			for (const unitFrames of await Promise.all(reads)) frames.push(...unitFrames);
 		}
 		return concat(frames);
@@ -539,7 +568,7 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 			const nowMs = (Number.isFinite(time) ? time : 0) * 1000;
 			// After a seek forward, everything between the cursor and the playhead is already over.
 			if (nextCue < cues.length && cueMs(nextCue) < nowMs - FORWARD_JUMP_MS) arm(nowMs);
-			const bytes = await readBatch(nowMs + lookaheadSeconds * 1000, nowMs);
+			const bytes = await readBatch(nowMs + lookaheadSeconds * 1000);
 			if (disposed) {
 				controller.close();
 				return;

@@ -363,15 +363,63 @@ describe('mkvPgsSource', () => {
 		expect(await source.ready).toBe(true);
 	});
 
+	test('reads past the prefetch window to finish its last display set before it is due', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 14000, 40000], fillerBytes: 32}));
+		const source = openSource({lookaheadSeconds: 15});
+		await source.ready;
+		const first = await source.readable.getReader().read();
+		expect([...new Set(ptsOf(first.value))]).toEqual([1000 * 90, 14000 * 90, 40000 * 90]);
+		source.dispose();
+	});
+
+	test('retries a failed response body instead of losing a subtitle', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32}));
+		const fetchFile = global.fetch;
+		let failedRange;
+		let failures = 0;
+		global.fetch = jest.fn(async (url, init) => {
+			const response = await fetchFile(url, init);
+			// Fail a later block probe, after header validation has succeeded.
+			const range = init.headers.Range;
+			const [, start, end] = /bytes=(\d+)-(\d+)/.exec(range);
+			if (!failedRange && Number(end) - Number(start) === 63 && fetchFile.mock.calls.length > 5) failedRange = range;
+			if (range === failedRange && failures++ < 3) {
+				return {...response, arrayBuffer: async () => { throw new Error('connection reset during body'); }};
+			}
+			return response;
+		});
+		const source = openSource({lookaheadSeconds: 10});
+		expect(await source.ready).toBe(true);
+		expect([...new Set(ptsOf(await readAll(source)))]).toEqual([1000 * 90, 2000 * 90, 3000 * 90]);
+		expect(failures).toBeGreaterThan(3);
+	});
+
+	test('times out a stalled response body and retries it', async () => {
+		serveFile(buildFile({subtitleTimes: [1000], fillerBytes: 32}));
+		const fetchFile = global.fetch;
+		let stalled = false;
+		global.fetch = jest.fn(async (url, init) => {
+			const response = await fetchFile(url, init);
+			if (!stalled) {
+				stalled = true;
+				return {...response, arrayBuffer: () => new Promise(() => {})};
+			}
+			return response;
+		});
+		const source = openSource({fetchTimeoutMs: 10});
+		expect(await source.ready).toBe(true);
+		expect([...new Set(ptsOf(await readAll(source)))]).toEqual([1000 * 90]);
+	});
+
 	test('jumps the cursor to the playhead after a seek forward', async () => {
 		serveFile(buildFile({subtitleTimes: [1000, 2000, 10000, 20000, 30000, 31000], fillerBytes: 32}));
 		let time = 0;
 		const source = openSource({getTime: () => time, lookaheadSeconds: 5});
 		await source.ready;
 		const reader = source.readable.getReader();
-		expect([...new Set(ptsOf((await reader.read()).value))]).toEqual([1000 * 90, 2000 * 90]);
+		expect([...new Set(ptsOf((await reader.read()).value))]).toEqual([1000 * 90, 2000 * 90, 10000 * 90]);
 		time = 30;
-		// 10s and 20s are over by now, so they are never read.
+		// The 10s cue was prefetched to complete the 2s cue; the 20s cue is skipped by the seek.
 		expect([...new Set(ptsOf((await reader.read()).value))]).toEqual([30000 * 90, 31000 * 90]);
 		expect((await reader.read()).done).toBe(true);
 		expect(source.needsRestart(25)).toBe(true);
