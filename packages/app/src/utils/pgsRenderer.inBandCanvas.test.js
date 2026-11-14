@@ -71,6 +71,18 @@ test('clears the externally owned canvas when a seek disposes the old renderer',
 	view.dispose();
 });
 
+test('scopes index reuse to the same playback track object', async () => {
+	let view = await initPgsCanvasInBandRenderer({}, track, 120);
+	const cache = createInBandPgsSource.mock.calls.at(-1)[0].indexCache;
+	view.dispose();
+	view = await initPgsCanvasInBandRenderer({}, track, 10);
+	expect(createInBandPgsSource.mock.calls.at(-1)[0].indexCache).toBe(cache);
+	view.dispose();
+	view = await initPgsCanvasInBandRenderer({}, {inBand: {...track.inBand}}, 10);
+	expect(createInBandPgsSource.mock.calls.at(-1)[0].indexCache).not.toBe(cache);
+	view.dispose();
+});
+
 test('restores fetch and releases the source when libpgs cannot start', async () => {
 	const fetchBefore = global.fetch;
 	const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});

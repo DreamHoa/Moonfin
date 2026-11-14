@@ -9,6 +9,8 @@
 import {createInBandPgsSource} from './mkvPgsSource';
 
 let streamUrlCounter = 0;
+// Reuse only within this playback track's lifetime, never across unrelated media.
+const inBandIndexes = new WeakMap();
 
 const installStreamFetch = (url, readable) => {
 	const original = globalThis.fetch;
@@ -150,14 +152,20 @@ export const initPgsCanvasRenderer = async (canvasElement, subtitleStream) => {
 /** The canvas equivalent of the webOS in-band reader, driven by AVPlay's clock. */
 export const initPgsCanvasInBandRenderer = async (canvasElement, subtitleStream, startTime = 0) => {
 	if (!subtitleStream?.inBand || !canvasElement) return null;
-	window.__moonfinMkvBuild = '20261114.5-seek';
-	console.info('[Tizen MKV] PGS build 20261114.5-seek, start:', startTime);
+	window.__moonfinMkvBuild = '20261114.6-index';
+	console.info('[Tizen MKV] PGS build 20261114.6-index, start:', startTime);
 	const clock = {time: startTime, offset: 0};
+	let indexCache = inBandIndexes.get(subtitleStream.inBand);
+	if (!indexCache) {
+		indexCache = {};
+		inBandIndexes.set(subtitleStream.inBand, indexCache);
+	}
 	const source = createInBandPgsSource({
 		streamUrl: subtitleStream.inBand.streamUrl,
 		subtitleOrdinal: subtitleStream.inBand.ordinal,
 		getTime: () => clock.time,
-		startTime
+		startTime,
+		indexCache
 	});
 	try {
 		if (!(await source.ready)) {

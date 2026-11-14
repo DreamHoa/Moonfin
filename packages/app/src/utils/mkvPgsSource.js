@@ -342,7 +342,7 @@ const inflate = (bytes) => unzlibSync(bytes);
  * track that isn't PGS or a layout this reader gets wrong shows up as a fallback rather
  * than as missing or garbage subtitles.
  */
-export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, startTime = 0, lookaheadSeconds = 15, fetchTimeoutMs = FETCH_TIMEOUT_MS}) => {
+export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, startTime = 0, lookaheadSeconds = 15, fetchTimeoutMs = FETCH_TIMEOUT_MS, indexCache}) => {
 	if (!streamUrl || typeof subtitleOrdinal !== 'number' || subtitleOrdinal < 0) return null;
 
 	let header = null;
@@ -491,21 +491,28 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 	};
 
 	const prepare = async () => {
-		header = parseHeader(await fetchRange(0, HEAD_BYTES - 1));
-		if (!header.tracks.length || header.cuesOffset === null) return false;
-		const subtitleTracks = header.tracks.filter((entry) => entry.type === SUBTITLE_TRACK_TYPE);
-		const track = subtitleTracks[subtitleOrdinal];
-		if (!track || track.codec !== PGS_CODEC_ID || track.unsupportedEncoding) return false;
-		// zlib and header stripping are both cheap to undo here. bzip2/lzo are rare
-		// and deliberately fall back to Jellyfin's extractor instead.
-		if (track.compressionAlgorithm !== null && track.compressionAlgorithm !== 0 && track.compressionAlgorithm !== 3) return false;
-		trackNumber = track.number;
-		compressionAlgorithm = track.compressionAlgorithm;
-		compressionSettings = track.compressionSettings;
-		timestampScale = header.timestampScale / 1000000;
-		cues = await readCues(header.cuesOffset);
-		// A cue with no relative position names only the cluster, not where the block sits in it.
-		if (!cues.length || cues.some((cue) => cue.relativePosition === null)) return false;
+		const cached = indexCache?.value;
+		if (cached?.streamUrl === streamUrl && cached.subtitleOrdinal === subtitleOrdinal) {
+			({header, trackNumber, timestampScale, cues, compressionAlgorithm, compressionSettings} = cached);
+		} else {
+			header = parseHeader(await fetchRange(0, HEAD_BYTES - 1));
+			if (!header.tracks.length || header.cuesOffset === null) return false;
+			const subtitleTracks = header.tracks.filter((entry) => entry.type === SUBTITLE_TRACK_TYPE);
+			const track = subtitleTracks[subtitleOrdinal];
+			if (!track || track.codec !== PGS_CODEC_ID || track.unsupportedEncoding) return false;
+			// zlib and header stripping are both cheap to undo here. bzip2/lzo are rare
+			// and deliberately fall back to Jellyfin's extractor instead.
+			if (track.compressionAlgorithm !== null && track.compressionAlgorithm !== 0 && track.compressionAlgorithm !== 3) return false;
+			trackNumber = track.number;
+			compressionAlgorithm = track.compressionAlgorithm;
+			compressionSettings = track.compressionSettings;
+			timestampScale = header.timestampScale / 1000000;
+			cues = await readCues(header.cuesOffset);
+			// A cue with no relative position names only the cluster, not where the block sits in it.
+			if (!cues.length || cues.some((cue) => cue.relativePosition === null)) return false;
+			// The index is immutable; a new decoder only needs a new cursor and target data.
+			if (indexCache) indexCache.value = {streamUrl, subtitleOrdinal, header, trackNumber, timestampScale, cues, compressionAlgorithm, compressionSettings};
+		}
 		// Read one access unit up front, so a layout this reader gets wrong falls back before anything shows.
 		// mkvmerge and FFmpeg put a whole display set in each block, so it has to end with the end segment.
 		arm(Math.max(0, startTime || 0) * 1000);

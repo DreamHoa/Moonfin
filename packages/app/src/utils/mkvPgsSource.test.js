@@ -389,6 +389,43 @@ describe('mkvPgsSource', () => {
 		} finally { source.dispose(); }
 	});
 
+	test('reuses the playback index after decoder disposal but reads fresh target data', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32}));
+		const indexCache = {};
+		const first = openSource({indexCache});
+		expect(await first.ready).toBe(true);
+		await readAll(first);
+		first.dispose();
+		global.fetch.mockClear();
+		const second = openSource({indexCache, startTime: 2.5, getTime: () => 2.5});
+		try {
+			expect(await second.ready).toBe(true);
+			expect([...new Set(ptsOf(await readAll(second)))]).toEqual([2000 * 90, 3000 * 90]);
+			expect(global.fetch.mock.calls.length).toBeGreaterThan(0);
+			expect(global.fetch.mock.calls.some(([, init]) => init.headers.Range.startsWith('bytes=0-'))).toBe(false);
+		} finally { second.dispose(); }
+	});
+
+	test('does not reuse an index for a different URL or subtitle ordinal', async () => {
+		serveFile(buildFile({subtitleTimes: [1000], fillerBytes: 32}));
+		const indexCache = {};
+		const first = openSource({indexCache});
+		expect(await first.ready).toBe(true);
+		await readAll(first);
+		first.dispose();
+		global.fetch.mockClear();
+		const otherUrl = openSource({indexCache, streamUrl: 'http://server/other'});
+		expect(await otherUrl.ready).toBe(true);
+		await readAll(otherUrl);
+		otherUrl.dispose();
+		expect(global.fetch.mock.calls.some(([, init]) => init.headers.Range.startsWith('bytes=0-'))).toBe(true);
+		global.fetch.mockClear();
+		const otherTrack = openSource({indexCache, streamUrl: 'http://server/other', subtitleOrdinal: 1});
+		expect(await otherTrack.ready).toBe(false);
+		otherTrack.dispose();
+		expect(global.fetch.mock.calls.some(([, init]) => init.headers.Range.startsWith('bytes=0-'))).toBe(true);
+	});
+
 	test('delivers an ordered current composition while a future block is stalled', async () => {
 		const bytes = buildFile({subtitleTimes: [1000, 2000], fillerBytes: 32});
 		const header = parseHeader(bytes);
