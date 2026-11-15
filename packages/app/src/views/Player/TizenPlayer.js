@@ -92,7 +92,7 @@ import {
 	remoteSubtitleNotAppearedMessage
 } from './remoteSubtitleUtils';
 import {getVideoDisplayAspectRatio, getZoomDisplayRect} from './aspectRatioUtils';
-import {mapJellyfinTrackToTizen} from './tizenTrackUtils';
+import {embeddedSubtitleTracks, mapJellyfinTrackToTizen} from './tizenTrackUtils';
 import serverLogger from '../../services/serverLogger';
 import {summarizeAvplayTracks, describeSubtitleStream, describeSubtitleStreams} from './subtitleDiagnostics';
 import {describeVideoStream, readVideoSupport} from './videoDiagnostics';
@@ -226,6 +226,8 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	const [duration, setDuration] = useState(0);
 	const [audioStreams, setAudioStreams] = useState([]);
 	const [subtitleStreams, setSubtitleStreams] = useState([]);
+	const subtitleStreamsRef = useRef([]);
+	subtitleStreamsRef.current = subtitleStreams;
 	const [chapters, setChapters] = useState([]);
 	const [selectedAudioIndex, setSelectedAudioIndex] = useState(null);
 	const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(-1);
@@ -649,7 +651,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	 * quiet skips the logs on the confirmation pass, which repeats after every seek.
 	 */
 	const applyNativeSubtitleTrack = useCallback((stream, streamList, trackInfo = null, {quiet = false} = {}) => {
-		const embedded = (streamList || []).filter((s) => s.isEmbeddedNative);
+		const embedded = embeddedSubtitleTracks(streamList);
 		const tracks = trackInfo || avplayGetTracks();
 		const tizenIndex = mapJellyfinTrackToTizen(tracks, embedded, 'TEXT', stream.index);
 		if (tizenIndex == null) {
@@ -1291,6 +1293,20 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	// Draws a pgs track on the same canvas the ass renderer uses. The track is picked
 	// while the loading screen is still standing in for the player, so the wait is what
 	// gives the renderer somewhere to draw instead of handing it nothing.
+	const tryNativeSubtitleFallback = useCallback((stream, isCurrent) => {
+		const session = playback.getCurrentSession();
+		if (!isCurrent() || !stream?.canRenderNative || session?.playMethod !== playback.PlayMethod.DirectPlay) return false;
+		try {
+			if (!applyNativeSubtitleTrack(stream, subtitleStreamsRef.current)) return false;
+			setSubtitleTrackEvents(null);
+			setCurrentSubtitleText(null);
+			return true;
+		} catch (err) {
+			console.warn('[Player] Native subtitle fallback failed:', err);
+			return false;
+		}
+	}, [applyNativeSubtitleTrack]);
+
 	const startPgsRenderer = useCallback(async (stream, isCurrent = () => true) => {
 		let canvas = null;
 		let renderer = null;
@@ -1301,6 +1317,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				renderer = await initPgsCanvasInBandRenderer(canvas, stream,
 					Math.max(0, positionRef.current / 10000000 - subtitleOffsetRef.current));
 			}
+			if (!renderer && stream?.inBand && tryNativeSubtitleFallback(stream, isCurrent)) return;
 			if (!renderer && isCurrent() && canvas && stream?.deliveryUrl) {
 				renderer = await initPgsCanvasRenderer(canvas, stream);
 			}
@@ -1332,7 +1349,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		}
 		// the chosen track owns the screen now, so text left from the last one goes
 		setSubtitleTrackEvents(null);
-	}, [waitForSubtitleCanvas]);
+	}, [waitForSubtitleCanvas, tryNativeSubtitleFallback]);
 	restartPgsRef.current = startPgsRenderer;
 
 	const disposeTextSource = useCallback(() => {
@@ -1345,26 +1362,34 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		setSubtitleTrackEvents(null);
 		if (stream.inBandText) {
 			const {streamUrl, ordinal, language} = stream.inBandText;
-			const source = createInBandTextSource({
-				streamUrl, subtitleOrdinal: ordinal, language,
-				getTime: () => positionRef.current / 10000000 - subtitleOffsetRef.current,
-				onEvents: (events) => {
-					if (isCurrent() && textSourceRef.current === source) {
-						setSubtitleTrackEvents(previous => [...(previous || []), ...events]);
-						console.log('[Tizen MKV] Text events read:', events.length);
+			let source;
+			try {
+				source = createInBandTextSource({
+					streamUrl, subtitleOrdinal: ordinal, language,
+					getTime: () => positionRef.current / 10000000 - subtitleOffsetRef.current,
+					onEvents: (events) => {
+						if (isCurrent() && textSourceRef.current === source) {
+							setSubtitleTrackEvents(previous => [...(previous || []), ...events]);
+							console.log('[Tizen MKV] Text events read:', events.length);
+						}
 					}
-				}
-			});
-			textSourceRef.current = source;
-			const ready = await trackSubtitleFetch(source.ready);
-			if (!isCurrent() || textSourceRef.current !== source) { source.dispose(); return; }
-			console.log('[Tizen MKV] In-band text ready:', ready);
-			if (ready) return;
-			disposeTextSource();
+				});
+			} catch (err) {
+				console.warn('[Player] In-band text initialization failed:', err);
+			}
+			if (source) {
+				textSourceRef.current = source;
+				const ready = await trackSubtitleFetch(source.ready);
+				if (!isCurrent() || textSourceRef.current !== source) { source.dispose(); return; }
+				console.log('[Tizen MKV] In-band text ready:', ready);
+				if (ready) return;
+				disposeTextSource();
+			}
+			if (tryNativeSubtitleFallback(stream, isCurrent)) return;
 		}
 		const data = await trackSubtitleFetch(playback.fetchSubtitleData(stream));
 		if (isCurrent()) setSubtitleTrackEvents(data?.TrackEvents || null);
-	}, [disposeTextSource, trackSubtitleFetch]);
+	}, [disposeTextSource, trackSubtitleFetch, tryNativeSubtitleFallback]);
 
 	// Draws an ass track on the canvas, falling back to server extracted text events
 	// when the renderer cant start. Every way out leaves a line in the log, since a
@@ -1542,6 +1567,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 					setDuration((r.runTimeTicks || 0) / 10000000);
 					setAudioStreams(r.audioStreams || []);
 					setSubtitleStreams(r.subtitleStreams || []);
+					subtitleStreamsRef.current = r.subtitleStreams || [];
 				};
 
 				applyPlaybackResult(result);
@@ -3261,6 +3287,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				includeEmbeddedNative: true
 			});
 			setSubtitleStreams(refreshedSubtitleStreams);
+			subtitleStreamsRef.current = refreshedSubtitleStreams;
 			await applySubtitleSelection(appeared.Index, refreshedSubtitleStreams, true);
 		} catch (err) {
 			setRemoteSubtitleError(remoteSubtitleDownloadError(err));

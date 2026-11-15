@@ -353,10 +353,9 @@ export const getMimeType = (container) => {
 	return mimeTypes[container?.toLowerCase()] || 'video/mp4';
 };
 
-// Tizen keeps the server extracted sidecar for now: the in band reader is not wired
-// into the Tizen renderer here, and silently dropping the delivery url would leave
-// PGS with nothing to render.
-export const canRenderEmbeddedPgsInBand = () => true;
+// Older Tizen runtimes still use native tracks or server-extracted sidecars.
+export const canRenderEmbeddedPgsInBand = () =>
+	typeof ReadableStream === 'function' && typeof Response === 'function';
 
 export const setDisplayWindow = async (rect) => {
 	if (!isAVPlayAvailable) return false;

@@ -440,6 +440,8 @@ const extractSubtitleStreams = (mediaSource, itemId = null, creds = null, assBur
 				(playMethod !== PlayMethod.DirectPlay || !plexReadsFromFile(s, mediaSource.Container, pgsOff));
 			const isBurnIn = (bitmapOnly && !hostRendered) || s.DeliveryMethod === 'Encode' ||
 				(assBurnsIn && isAssSubtitleCodec(codec)) || plexBurns;
+			const canRenderNative = !isBurnIn && !s.IsExternal && s.DeliveryMethod !== 'External' &&
+				(isImageBased || (isTextBased && mediaSource.SupportsTranscoding === false));
 			return {
 				index: s.Index,
 				codec: s.Codec,
@@ -460,8 +462,9 @@ const extractSubtitleStreams = (mediaSource, itemId = null, creds = null, assBur
 				// comes over the API because the profile asks the server to extract it, but a
 				// server that cant transcode cant extract either, and then the copy in the
 				// container is the only one text has.
-				isEmbeddedNative: !inBand && !inBandText && !isBurnIn && !s.IsExternal && s.DeliveryMethod !== 'External' &&
-					(isImageBased || (isTextBased && mediaSource.SupportsTranscoding === false)),
+				isEmbedded: !s.IsExternal,
+				canRenderNative,
+				isEmbeddedNative: !inBand && !inBandText && canRenderNative,
 				inBand,
 				inBandText,
 				deliveryUrl: deliveryUrl,

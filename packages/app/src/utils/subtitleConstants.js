@@ -140,5 +140,13 @@ export const sanitizeSubtitleHtml = (text) =>
 		.replace(/\r?\n/gi, '<br/>')
 		.replace(/{\\.*?}/gi, '')
 		.replace(/ {2,}/g, ' ')
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		// Restore only subtitle text formatting; attributes and other HTML stay inert.
+		.replace(/&lt;(\/?)(b|i|u)&gt;/gi, '<$1$2>')
+		.replace(/&lt;br\s*\/?&gt;/gi, '<br/>')
+		.replace(/&lt;(\/?)font&gt;/gi, '<$1font>')
+		.replace(/&lt;font\s+color\s*=\s*["']?(#[0-9a-f]{3}(?:[0-9a-f]{3})?|[a-z]{1,20})["']?\s*&gt;/gi, '<font color="$1">')
 		.trim();
 

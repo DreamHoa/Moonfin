@@ -1,9 +1,20 @@
-import {mapJellyfinTrackToTizen} from './tizenTrackUtils';
+import {embeddedSubtitleTracks, mapJellyfinTrackToTizen} from './tizenTrackUtils';
 
 const avplayTrack = (index, type) => ({index, type});
 const stream = (index, codec) => ({index, codec});
 
 describe('mapJellyfinTrackToTizen', () => {
+	it('keeps a locally read SRT in the physical list before a native ASS', () => {
+		const streams = [
+			{index: 2, codec: 'subrip', isEmbedded: true, inBandText: {}},
+			{index: 3, codec: 'ass', isEmbedded: true, isEmbeddedNative: true},
+			{index: 4, codec: 'srt', isEmbedded: false}
+		];
+		expect(mapJellyfinTrackToTizen([avplayTrack(0, 'TEXT'), avplayTrack(1, 'TEXT')], embeddedSubtitleTracks(streams), 'TEXT', 3)).toBe(1);
+	});
+	it('refuses to guess which text codec firmware omitted when counts still disagree', () => {
+		expect(mapJellyfinTrackToTizen([avplayTrack(2, 'TEXT')], [stream(2, 'subrip'), stream(3, 'ass')], 'TEXT', 3)).toBeNull();
+	});
 	it('pairs positionally when the counts agree', () => {
 		const tracks = [avplayTrack(0, 'AUDIO'), avplayTrack(1, 'AUDIO')];
 		const streams = [stream(1, 'ac3'), stream(2, 'aac')];

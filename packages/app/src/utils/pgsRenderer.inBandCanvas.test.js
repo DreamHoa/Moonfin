@@ -92,3 +92,18 @@ test('restores fetch and releases the source when libpgs cannot start', async ()
 	expect(source.dispose).toHaveBeenCalled();
 	warning.mockRestore();
 });
+
+test('construction errors return null so the player can fall back to sidecar rendering', async () => {
+	createInBandPgsSource.mockImplementation(() => { throw new Error('ReadableStream unavailable'); });
+	expect(await initPgsCanvasInBandRenderer({}, track)).toBeNull();
+});
+
+test('never caches an unread next composition and renders the first available index', async () => {
+	const cache = jest.fn();
+	const pgs = {displaySets: [{}], updateTimestamps: [90000], cacheSubtitleAtIndex: cache};
+	native.implementation = {pgs, previousTimestampIndex: 0};
+	await initPgsCanvasInBandRenderer({}, track);
+	pgs.cacheSubtitleAtIndex(1);
+	expect(cache).not.toHaveBeenCalledWith(1);
+	expect(native.implementation.previousTimestampIndex).not.toBe(0);
+});

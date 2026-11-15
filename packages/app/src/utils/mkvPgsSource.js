@@ -343,7 +343,7 @@ const inflate = (bytes) => unzlibSync(bytes);
  * than as missing or garbage subtitles.
  */
 export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, startTime = 0, lookaheadSeconds = 15, fetchTimeoutMs = FETCH_TIMEOUT_MS, indexCache}) => {
-	if (!streamUrl || typeof subtitleOrdinal !== 'number' || subtitleOrdinal < 0) return null;
+	if (!streamUrl || typeof subtitleOrdinal !== 'number' || subtitleOrdinal < 0 || typeof ReadableStream !== 'function') return null;
 
 	let header = null;
 	let trackNumber = 0;
@@ -355,7 +355,9 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 	let disposed = false;
 	let compressionAlgorithm = null;
 	let compressionSettings = null;
-	let preparedUnit = null;
+	const preparedUnits = new Map();
+	const unitReads = new Map();
+	let lastDeliveredCue = -1;
 	const clusterDataOffsets = new Map();
 
 	const cueMs = (index) => cues[index].time * timestampScale;
@@ -418,12 +420,19 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 	const clusterDataOffset = async (clusterPosition) => {
 		const cached = clusterDataOffsets.get(clusterPosition);
 		if (cached !== undefined) return cached;
-		const clusterStart = header.segmentDataOffset + clusterPosition;
-		const clusterHeader = readElementHeader(await fetchRange(clusterStart, clusterStart + 15), 0);
-		if (!clusterHeader || clusterHeader.id !== ID.Cluster) throw new Error(`no cluster at ${clusterStart}`);
-		const value = clusterStart + clusterHeader.headerLength;
-		clusterDataOffsets.set(clusterPosition, value);
-		return value;
+		const pending = (async () => {
+			const clusterStart = header.segmentDataOffset + clusterPosition;
+			const clusterHeader = readElementHeader(await fetchRange(clusterStart, clusterStart + 15), 0);
+			if (!clusterHeader || clusterHeader.id !== ID.Cluster) throw new Error(`no cluster at ${clusterStart}`);
+			return clusterStart + clusterHeader.headerLength;
+		})();
+		clusterDataOffsets.set(clusterPosition, pending);
+		try {
+			return await pending;
+		} catch (err) {
+			clusterDataOffsets.delete(clusterPosition);
+			throw err;
+		}
 	};
 
 	const readAccessUnit = async (cue) => {
@@ -482,12 +491,58 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		return accessUnitToSup(unit.timeMs, payload);
 	};
 
+	const loadUnit = (cue) => {
+		let pending = unitReads.get(cue);
+		if (!pending) {
+			pending = readAccessUnit(cue).then(toSupFrames);
+			// Prefetch failures are consumed later by readCue, after bounded retries.
+			pending.catch(() => {});
+			unitReads.set(cue, pending);
+		}
+		return pending;
+	};
+
 	// Put the cursor on the last cue at or before the target, including its clear composition.
 	const arm = (targetMs) => {
 		let index = 0;
 		while (index < cues.length && cueMs(index) <= targetMs) index++;
 		nextCue = Math.max(0, index - 1);
 		servedFromMs = cues.length ? Math.min(cueMs(nextCue), targetMs) : targetMs;
+	};
+
+	const prepareContext = async () => {
+		preparedUnits.clear();
+		// Fetch imminent data while resolving older dependencies, rather than putting
+		// a short destination subtitle behind several sequential context requests.
+		for (let ahead = 1; ahead <= 2 && nextCue + ahead < cues.length; ahead++) loadUnit(cues[nextCue + ahead]);
+		let first = nextCue;
+		for (let count = 0; count < 64 && !disposed; count++, first--) {
+			const cue = cues[first];
+			const frames = await loadUnit(cue);
+			const composition = frames.find((frame) => frame[SUP_FRAME_HEADER_BYTES] === 0x16);
+			if (!composition || composition.length < SUP_FRAME_HEADER_BYTES + 3 + 11 ||
+				frames[frames.length - 1]?.[SUP_FRAME_HEADER_BYTES] !== PGS_END_SEGMENT) return false;
+			preparedUnits.set(cue, frames);
+			// A blank target followed by an independent acquisition needs no older
+			// pixels. Verify that next set before paying for a previous epoch: otherwise
+			// the extra round trip can consume the entire first short subtitle.
+			if (first === nextCue && composition[SUP_FRAME_HEADER_BYTES + 3 + 7] === 0 &&
+				composition[SUP_FRAME_HEADER_BYTES + 3 + 10] === 0 && first + 1 < cues.length) {
+				const following = await loadUnit(cues[first + 1]).catch(() => []);
+				const next = following.find(frame => frame[SUP_FRAME_HEADER_BYTES] === 0x16);
+				if (next?.length >= SUP_FRAME_HEADER_BYTES + 3 + 11 && next[SUP_FRAME_HEADER_BYTES + 3 + 7] !== 0 &&
+					following[following.length - 1]?.[SUP_FRAME_HEADER_BYTES] === PGS_END_SEGMENT) return true;
+			}
+			// Normal compositions reuse earlier definitions. Keep every display set
+			// back to an acquisition/epoch, or to context already held by this decoder.
+			if (composition[SUP_FRAME_HEADER_BYTES + 3 + 7] !== 0 || first === lastDeliveredCue + 1 && lastDeliveredCue >= 0) {
+				nextCue = first;
+				servedFromMs = Math.min(servedFromMs, cueMs(first));
+				return true;
+			}
+			if (first === 0) return false;
+		}
+		return false;
 	};
 
 	const prepare = async () => {
@@ -516,24 +571,24 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		// Read one access unit up front, so a layout this reader gets wrong falls back before anything shows.
 		// mkvmerge and FFmpeg put a whole display set in each block, so it has to end with the end segment.
 		arm(Math.max(0, startTime || 0) * 1000);
-		const preparedCue = cues[nextCue];
-		const frames = toSupFrames(await readAccessUnit(preparedCue));
-		preparedUnit = {cue: preparedCue, frames};
-		return frames.length > 0 && frames[frames.length - 1][SUP_FRAME_HEADER_BYTES] === PGS_END_SEGMENT;
+		return prepareContext();
 	};
 
 	const readCue = async (cue) => {
-		if (preparedUnit?.cue === cue) {
-			const frames = preparedUnit.frames;
-			preparedUnit = null;
+		if (preparedUnits.has(cue)) {
+			const frames = preparedUnits.get(cue);
+			preparedUnits.delete(cue);
+			unitReads.delete(cue);
 			return frames;
 		}
 		try {
-			return toSupFrames(await readAccessUnit(cue));
+			return await loadUnit(cue);
 		} catch (err) {
 			// fetchRange already retries. One unavailable cue must not stall the entire batch forever.
 			console.warn('[PgsRenderer] Skipped unavailable in-band subtitle at', cue.time * timestampScale, err);
 			return [];
+		} finally {
+			unitReads.delete(cue);
 		}
 	};
 
@@ -542,19 +597,24 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		while (nextCue < cues.length && batch.length < MAX_CUES_PER_BATCH && cueMs(nextCue) <= targetMs) {
 			batch.push(cues[nextCue++]);
 		}
-		// libpgs completes a display set when the next composition arrives. Read beyond
-		// the prefetch window now, rather than waiting until the final prefetched cue is due.
-		if (batch.length && nextCue < cues.length) batch.push(cues[nextCue++]);
+		// libpgs peeks a byte into the following block before publishing a display
+		// set, and its timestamp lookup also needs a published later composition.
+		// Two sets beyond the window satisfy both requirements, including long gaps.
+		if (batch.length) {
+			for (let ahead = 0; ahead < 2 && nextCue < cues.length; ahead++) batch.push(cues[nextCue++]);
+		}
 		if (!batch.length) return null;
 		let delivered = false;
 		for (let i = 0; i < batch.length; i += READ_CONCURRENCY) {
-			const reads = batch.slice(i, i + READ_CONCURRENCY).map(readCue);
+			const group = batch.slice(i, i + READ_CONCURRENCY);
+			const reads = group.map(readCue);
 			// Preserve timestamp order without holding current data behind future requests.
-			for (const read of reads) {
-				const frames = await read;
+			for (let j = 0; j < reads.length; j++) {
+				const frames = await reads[j];
 				if (disposed) return delivered;
 				if (frames.length) {
 					controller.enqueue(concat(frames));
+					lastDeliveredCue = cues.indexOf(group[j]);
 					delivered = true;
 				}
 			}
@@ -583,7 +643,10 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 			const time = getTime();
 			const nowMs = (Number.isFinite(time) ? time : 0) * 1000;
 			// After a seek forward, everything between the cursor and the playhead is already over.
-			if (nextCue < cues.length && cueMs(nextCue) < nowMs - FORWARD_JUMP_MS) arm(nowMs);
+			if (nextCue < cues.length && cueMs(nextCue) < nowMs - FORWARD_JUMP_MS) {
+				arm(nowMs);
+				if (!(await prepareContext())) throw new Error('PGS seek context unavailable');
+			}
 			const delivered = await readBatch(nowMs + lookaheadSeconds * 1000, controller);
 			if (disposed) {
 				controller.close();
@@ -616,6 +679,8 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		},
 		dispose() {
 			disposed = true;
+			preparedUnits.clear();
+			unitReads.clear();
 			clusterDataOffsets.clear();
 			cues = [];
 		}
