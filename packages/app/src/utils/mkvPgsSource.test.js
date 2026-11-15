@@ -86,8 +86,8 @@ const join = (parts) => {
 
 const pgsSegment = (type, payload) => join([new Uint8Array([type]), uintBytes(payload.length, 2), payload]);
 
-const displaySet = (marker, objectBytes = 0) => join([
-	pgsSegment(0x16, new Uint8Array([0x00, marker])),
+const displaySet = (marker, objectBytes = 0, state = 0x80, objectCount = 1) => join([
+	pgsSegment(0x16, new Uint8Array([0x07, 0x80, 0x04, 0x38, 0, 0, marker, state, 0, 0, objectCount, ...new Array(objectCount * 8).fill(0)])),
 	pgsSegment(0x14, new Uint8Array([0x00, marker])),
 	...(objectBytes > 0 ? [pgsSegment(0x15, new Uint8Array(objectBytes).fill(marker))] : []),
 	pgsSegment(0x80, new Uint8Array([]))
@@ -122,7 +122,7 @@ const pgsTrackWithEncoding = (fields) => {
  * Build a real Matroska file with a subtitle cue per cluster, so the source sees the same
  * layout it sees in the wild: cues at the end, subtitle blocks buried behind filler.
  */
-const buildFile = ({subtitleTimes, fillerBytes = 200 * 1024, subtitlePayloadBytes = 0, blockGroup = false, omitRelativePosition = false, brokenIndex = -1, zlib = false, incompleteSets = false}) => {
+const buildFile = ({subtitleTimes, fillerBytes = 200 * 1024, subtitlePayloadBytes = 0, blockGroup = false, omitRelativePosition = false, brokenIndex = -1, zlib = false, incompleteSets = false, compositionStates = [], compositionObjectCounts = []}) => {
 	const tracks = element(0x1654ae6b, join([
 		trackEntry(1, 1, 'V_MPEGH/ISO/HEVC'),
 		trackEntry(2, 17, 'S_HDMV/PGS', zlib ? [ZLIB] : [])
@@ -140,7 +140,7 @@ const buildFile = ({subtitleTimes, fillerBytes = 200 * 1024, subtitlePayloadByte
 	const cuePoints = [];
 	for (const [index, time] of subtitleTimes.entries()) {
 		const filler = new Uint8Array(fillerBytes).fill(0x55);
-		let subtitle = displaySet(time & 0xff, subtitlePayloadBytes);
+		let subtitle = displaySet(time & 0xff, subtitlePayloadBytes, compositionStates[index], compositionObjectCounts[index]);
 		// The spec's one segment per block, where the rest of the display set sits in blocks with no cue.
 		if (incompleteSets) subtitle = pgsSegment(0x16, new Uint8Array([0x00, time & 0xff]));
 		if (zlib) subtitle = new Uint8Array(deflateSync(subtitle));
@@ -322,6 +322,30 @@ describe('mkvPgsSource', () => {
 		expect([...new Set(ptsOf(await readAll(source)))]).toEqual([1000 * 90, 2000 * 90]);
 	});
 
+	test('resuming at a Normal composition includes its acquisition context in order', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32, compositionStates: [0x80, 0, 0]}));
+		const source = openSource({getTime: () => 2.5, startTime: 2.5});
+		expect(await source.ready).toBe(true);
+		expect([...new Set(ptsOf(await readAll(source)))]).toEqual([90000, 180000, 270000]);
+		source.dispose();
+	});
+
+	test('falls back when no independently decodable composition exists', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000], fillerBytes: 32, compositionStates: [0, 0]}));
+		const source = openSource({startTime: 2});
+		expect(await source.ready).toBe(false);
+		source.dispose();
+	});
+
+	test('a blank target followed by an acquisition does not read an unrelated previous epoch', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32, brokenIndex: 0,
+			compositionStates: [0x80, 0, 0x80], compositionObjectCounts: [1, 0, 1]}));
+		const source = openSource({startTime: 2.5, getTime: () => 2.5});
+		expect(await source.ready).toBe(true);
+		expect([...new Set(ptsOf(await readAll(source)))]).toEqual([180000, 270000]);
+		source.dispose();
+	});
+
 	test('inflates zlib compressed blocks', async () => {
 		serveFile(buildFile({subtitleTimes: [1000, 2000], fillerBytes: 32, zlib: true}));
 		const source = openSource({lookaheadSeconds: 10});
@@ -344,6 +368,15 @@ describe('mkvPgsSource', () => {
 		await source.ready;
 		const bytes = await readThrough(source.readable.getReader(), 40000);
 		expect([...new Set(ptsOf(bytes))]).toEqual([1000 * 90, 40000 * 90]);
+		source.dispose();
+	});
+
+	test('delivers two sets past the window for parser lookahead and timestamp bracketing', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000, 40000, 60000], fillerBytes: 32}));
+		const source = openSource({getTime: () => 1.5, startTime: 1.5, lookaheadSeconds: 0});
+		expect(await source.ready).toBe(true);
+		const bytes = await readThrough(source.readable.getReader(), 40000);
+		expect([...new Set(ptsOf(bytes))]).toEqual([90000, 180000, 3600000]);
 		source.dispose();
 	});
 
@@ -472,17 +505,21 @@ describe('mkvPgsSource', () => {
 	});
 
 	test('a persistently failing cue does not block later subtitles indefinitely', async () => {
-		serveFile(buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32}));
+		const file = buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32});
+		const header = parseHeader(file);
+		const ce = splitElement(file, header.segmentDataOffset + header.cuesOffset);
+		const cue = parseCues(file, ce.bodyStart, ce.bodyEnd - ce.bodyStart, 2)[1];
+		const cluster = splitElement(file, header.segmentDataOffset + cue.clusterPosition);
+		const blockedStart = cluster.bodyStart + cue.relativePosition;
+		serveFile(file);
 		const fetchFile = global.fetch;
-		const source = openSource({lookaheadSeconds: 10});
-		expect(await source.ready).toBe(true);
-		let blockedRange;
 		global.fetch = jest.fn(async (url, init) => {
 			const match = /bytes=(\d+)-(\d+)/.exec(init.headers.Range);
-			if (!blockedRange && Number(match[2]) - Number(match[1]) === 32767) blockedRange = init.headers.Range;
-			if (init.headers.Range === blockedRange) return {status: 503};
+			if (Number(match[1]) === blockedStart) return {status: 503};
 			return fetchFile(url, init);
 		});
+		const source = openSource({lookaheadSeconds: 10});
+		expect(await source.ready).toBe(true);
 		const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
 		let timer;
 		try {
@@ -490,6 +527,32 @@ describe('mkvPgsSource', () => {
 			expect(bytes).not.toBeNull();
 			expect([...new Set(ptsOf(bytes))]).toEqual([1000 * 90, 3000 * 90]);
 		} finally { clearTimeout(timer); source.dispose(); warn.mockRestore(); }
+	});
+
+	test('prefetches the imminent subtitle while an older dependency is stalled', async () => {
+		const file = buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32, compositionStates: [0x80, 0, 0x80]});
+		const header = parseHeader(file);
+		const ce = splitElement(file, header.segmentDataOffset + header.cuesOffset);
+		const cues = parseCues(file, ce.bodyStart, ce.bodyEnd - ce.bodyStart, 2);
+		const offsets = cues.map(c => splitElement(file, header.segmentDataOffset + c.clusterPosition).bodyStart + c.relativePosition);
+		serveFile(file);
+		const fetchFile = global.fetch;
+		let release, futureRead = false;
+		const gate = new Promise(resolve => { release = resolve; });
+		global.fetch = jest.fn(async (url, init) => {
+			const at = Number(/bytes=(\d+)/.exec(init.headers.Range)[1]);
+			if (at === offsets[0]) await gate;
+			if (at === offsets[2]) futureRead = true;
+			return fetchFile(url, init);
+		});
+		const source = openSource({startTime: 2, getTime: () => 2.5});
+		try {
+			await new Promise(resolve => setTimeout(resolve, 20));
+			expect(futureRead).toBe(true);
+			release();
+			expect(await source.ready).toBe(true);
+			expect([...new Set(ptsOf(await readAll(source)))]).toEqual([90000, 180000, 270000]);
+		} finally { release(); source.dispose(); }
 	});
 
 	test('retries a range request the server failed once', async () => {
@@ -547,14 +610,14 @@ describe('mkvPgsSource', () => {
 	});
 
 	test('jumps the cursor to the playhead after a seek forward', async () => {
-		serveFile(buildFile({subtitleTimes: [1000, 2000, 10000, 20000, 30000, 31000], fillerBytes: 32}));
+		serveFile(buildFile({subtitleTimes: [1000, 2000, 10000, 20000, 24000, 30000, 31000], fillerBytes: 32}));
 		let time = 0;
 		const source = openSource({getTime: () => time, lookaheadSeconds: 5});
 		await source.ready;
 		const reader = source.readable.getReader();
-		expect([...new Set(ptsOf(await readThrough(reader, 10000)))]).toEqual([1000 * 90, 2000 * 90, 10000 * 90]);
+		expect([...new Set(ptsOf(await readThrough(reader, 20000)))]).toEqual([1000 * 90, 2000 * 90, 10000 * 90, 20000 * 90]);
 		time = 30;
-		// The 10s cue was prefetched to complete the 2s cue; the 20s cue is skipped by the seek.
+		// The two lookahead cues were prefetched; the unread 24s cue is skipped by the seek.
 		expect([...new Set(ptsOf(await readThrough(reader, 31000)))]).toEqual([30000 * 90, 31000 * 90]);
 		expect((await reader.read()).done).toBe(true);
 		expect(source.needsRestart(25)).toBe(true);

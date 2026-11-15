@@ -26,3 +26,28 @@ Current next stages: verify actual HDR playback, then profile global UI responsi
 2026-11-15: UI optimisation is now a separate BU8000 build profile. See BU8000-performance.txt for
 the exact feature scope, device A/B observations, package identity and measurement limits. The
 existing subtitle implementation stays frozen; UI speed results do not change its acceptance status.
+
+2026-11-15 review fixes, accepted build 20261115.9-clear:
+Escape subtitle HTML and allow only limited formatting/colors. Keep physical subtitle tracks separate
+from the render route, retain native fallback capability, and decline unsupported Web Streams runtimes.
+For PGS, rebuild Normal-composition dependencies, avoid caching an unloaded next frame in libpgs 0.8.1,
+and supply two lookahead sets (the stream parser peeks ahead and timestamp lookup also needs a later set).
+Fetch imminent compositions alongside context. A blank target may skip older context only after the
+following acquisition has been verified as independent; this avoids regressing short seek destinations.
+
+Device comparison used the same episode and seek to 183.549 seconds. The old build missed the whole
+202.911-205.122 composition. The accepted build drew it at 202.936, with all five observed dialogue sets
+drawn in their valid intervals. The first short composition drew at 186.935 versus 186.886 on the old
+build (49 ms difference; these are AVPlay clock observations with a 500 ms update loop, not panel latency).
+A large forward/backward seek drew the first destination composition at 186.898. A valid constructed
+Normal-composition fixture rendered 1542 nontransparent pixels on the TV using its preceding epoch.
+The installed sanitizer no longer created or executed the isolated img/onerror test element.
+
+An initial context candidate missed the first short line and was rejected. A later additional SRT
+cache/progressive-delivery experiment passed unit tests but did not finish device acceptance: native
+clock stalls and a seek-callback timeout were observed. That experiment was withdrawn; the accepted
+source and package retain the original mkvTextSource. No claim is made that existing SRT cold-load
+latency or all native buffering waits have been resolved. Native mapping/legacy capability fallbacks
+have regression tests; unsupported TV track omissions are refused rather than guessed.
+
+Acceptance is limited to the recorded fixtures and playback windows, not every file or firmware.

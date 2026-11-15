@@ -9,6 +9,10 @@ const HIDDEN_AUDIO_CODECS = [...DTS_FAMILY_CODECS, 'truehd', 'mlp'];
 const HIDDEN_TEXT_CODECS = [...PGS_SUBTITLE_CODECS, ...BURN_IN_SUBTITLE_CODECS, 'vobsub'];
 const TIZEN_TEXT_TRACK_LIMIT = 30;
 
+// Render routing must not remove tracks that still occupy a slot in the file.
+export const embeddedSubtitleTracks = (streams) => (streams || []).filter((s) =>
+	s.isEmbedded ?? Boolean(s.isEmbeddedNative || s.inBand || s.inBandText));
+
 export const mapJellyfinTrackToTizen = (avplayTracks, jellyfinStreams, type, jellyfinIndex) => {
 	const tracks = (Array.isArray(avplayTracks) ? avplayTracks : []).filter((t) => t.type === type);
 	if (tracks.length === 0) return null;
@@ -27,6 +31,9 @@ export const mapJellyfinTrackToTizen = (avplayTracks, jellyfinStreams, type, jel
 	}
 	if (type === 'TEXT') {
 		streams = streams.slice(0, TIZEN_TEXT_TRACK_LIMIT);
+		// Unknown subtitle omissions cannot be inferred positionally. Returning null
+		// lets the caller use its renderer instead of silently selecting another track.
+		if (streams.length !== tracks.length) return null;
 	}
 
 	const pos = streams.findIndex((s) => s.index === jellyfinIndex);

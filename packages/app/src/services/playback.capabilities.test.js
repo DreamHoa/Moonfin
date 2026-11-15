@@ -74,8 +74,11 @@ describe('embedded MKV subtitles on Tizen', () => {
 		const [pgs, ass, srt] = result.subtitleStreams;
 		expect(pgs.inBand).toEqual({streamUrl: result.url, ordinal: 0});
 		expect(pgs.isEmbeddedNative).toBe(false);
+		expect(pgs.canRenderNative).toBe(true);
 		expect(srt.inBandText).toEqual({streamUrl: result.url, ordinal: 2, language: 'chi'});
 		expect(srt.isEmbeddedNative).toBe(false);
+		expect(srt.canRenderNative).toBe(true);
+		expect(srt.isEmbedded).toBe(true);
 		expect(ass.inBandText).toBeNull();
 		expect(ass.isEmbeddedNative).toBe(true);
 	});

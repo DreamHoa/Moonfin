@@ -12,6 +12,21 @@ let streamUrlCounter = 0;
 // Reuse only within this playback track's lifetime, never across unrelated media.
 const inBandIndexes = new WeakMap();
 
+// libpgs 0.8 precompiles the next index even if a streaming source has not
+// delivered it. Its cached undefined survives the later arrival of that data.
+export const prepareProgressivePgsRenderer = (renderer) => {
+	const impl = renderer.implementation;
+	const pgs = impl?.pgs;
+	if (!pgs?.cacheSubtitleAtIndex) return renderer;
+	const cache = pgs.cacheSubtitleAtIndex.bind(pgs);
+	pgs.cacheSubtitleAtIndex = (index) => {
+		if (index >= 0 && index < pgs.displaySets.length) cache(index);
+	};
+	// The library starts at 0, which suppresses a first render already on index 0.
+	impl.previousTimestampIndex = -2;
+	return renderer;
+};
+
 const installStreamFetch = (url, readable) => {
 	const original = globalThis.fetch;
 	globalThis.fetch = (input, init) => {
@@ -28,7 +43,7 @@ const installStreamFetch = (url, readable) => {
 
 class InBandPgsRenderer {
 	constructor(renderer, source, clock) {
-		this.renderer = renderer;
+		this.renderer = prepareProgressivePgsRenderer(renderer);
 		this.source = source;
 		this.clock = clock;
 	}
@@ -152,24 +167,25 @@ export const initPgsCanvasRenderer = async (canvasElement, subtitleStream) => {
 /** The canvas equivalent of the webOS in-band reader, driven by AVPlay's clock. */
 export const initPgsCanvasInBandRenderer = async (canvasElement, subtitleStream, startTime = 0) => {
 	if (!subtitleStream?.inBand || !canvasElement) return null;
-	window.__moonfinMkvBuild = '20261114.6-index';
-	console.info('[Tizen MKV] PGS build 20261114.6-index, start:', startTime);
+	window.__moonfinMkvBuild = '20261115.9-clear';
+	console.info('[Tizen MKV] PGS build 20261115.9-clear, start:', startTime);
 	const clock = {time: startTime, offset: 0};
 	let indexCache = inBandIndexes.get(subtitleStream.inBand);
 	if (!indexCache) {
 		indexCache = {};
 		inBandIndexes.set(subtitleStream.inBand, indexCache);
 	}
-	const source = createInBandPgsSource({
-		streamUrl: subtitleStream.inBand.streamUrl,
-		subtitleOrdinal: subtitleStream.inBand.ordinal,
-		getTime: () => clock.time,
-		startTime,
-		indexCache
-	});
+	let source;
 	try {
-		if (!(await source.ready)) {
-			source.dispose();
+		source = createInBandPgsSource({
+			streamUrl: subtitleStream.inBand.streamUrl,
+			subtitleOrdinal: subtitleStream.inBand.ordinal,
+			getTime: () => clock.time,
+			startTime,
+			indexCache
+		});
+		if (!source || !(await source.ready)) {
+			source?.dispose();
 			return null;
 		}
 		const {PgsRenderer} = await import('libpgs');
@@ -183,7 +199,7 @@ export const initPgsCanvasInBandRenderer = async (canvasElement, subtitleStream,
 		}
 		return new InBandPgsRenderer(renderer, source, clock);
 	} catch (err) {
-		source.dispose();
+		source?.dispose();
 		console.warn('[PgsRenderer] In-band canvas source unavailable:', err);
 		return null;
 	}
