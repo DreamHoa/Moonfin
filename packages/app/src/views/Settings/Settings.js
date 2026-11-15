@@ -1,4 +1,4 @@
-import {Fragment, Suspense, lazy, useCallback, useState, useEffect, useLayoutEffect, useMemo, useRef} from 'react';
+import {Fragment, Suspense, lazy, memo, useCallback, useState, useEffect, useLayoutEffect, useMemo, useRef} from 'react';
 import {
 	hashPin, isPinShaped, pinMatches, lockoutRemaining, registerFailedAttempt, clearedLockout, tooManyAttempts, KIDS_PIN
 } from '../../utils/pinLockout';
@@ -1752,4 +1752,6 @@ const Settings = ({ onBack, onLibrariesChanged, onRunSetupWizard, onSelectItem, 
 	);
 };
 
-export default Settings;
+// Focusing the category pill or preview chips updates their parent. The list
+// only needs to render again when its own props, settings or state change.
+export default memo(Settings);

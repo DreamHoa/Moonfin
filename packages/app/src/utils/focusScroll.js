@@ -1,4 +1,5 @@
 import Spotlight from '@enact/spotlight';
+import {IS_BU8000_BUILD} from './personalBuild';
 
 // Spotlight focuses without scrolling, so anything taller than its box has to
 // bring the focused row into view itself. scrollIntoView options are ignored on
@@ -77,6 +78,10 @@ export const whenStill = (fn) => {
 
 const endGlide = (axis, node, glide) => {
 	window.cancelAnimationFrame(glide.frame);
+	if (glide.native) {
+		clearTimeout(glide.timer);
+		node.removeEventListener('scroll', glide.onScroll);
+	}
 	moving.delete(glide);
 	glides[axis].delete(node);
 };
@@ -84,8 +89,47 @@ const endGlide = (axis, node, glide) => {
 export const stopScrollAnimation = (node) => {
 	['x', 'y'].forEach((axis) => {
 		const glide = glides[axis].get(node);
-		if (glide) endGlide(axis, node, glide);
+		if (glide) {
+			endGlide(axis, node, glide);
+			if (glide.native) {
+				const {offset} = AXES[axis];
+				node.scrollTo({[axis === 'x' ? 'left' : 'top']: node[offset], behavior: 'auto'});
+			}
+		}
 	});
+};
+
+// Remember the intended landing position without synchronously reading the native scroll
+// offset on every animation scroll event. This also restores the selected card after Back.
+export const getScrollPosition = (node, axis = 'x') =>
+	IS_BU8000_BUILD ? glides[axis].get(node)?.target ?? node[AXES[axis].offset] : node[AXES[axis].offset];
+
+const animateNative = (node, axis, target, start) => {
+	const {offset} = AXES[axis];
+	const from = node[offset];
+	stopScrollAnimation(node);
+	if (Math.abs(target - from) < 1) return;
+	const property = axis === 'x' ? 'left' : 'top';
+	const glide = {target, native: true, timer: 0, lastEvent: Date.now(), started: Date.now()};
+	const settle = () => {
+		// scrollend is unavailable in this TV engine. Observe quietness with a timer;
+		// do not add a requestAnimationFrame loop that reads layout on every frame.
+		if (Date.now() - glide.lastEvent < 80 || (Math.abs(node[offset] - target) > 1 && Date.now() - glide.started < 2000)) {
+			glide.timer = setTimeout(settle, 100);
+		} else endGlide(axis, node, glide);
+	};
+	glide.onScroll = () => { glide.lastEvent = Date.now(); };
+	glides[axis].set(node, glide);
+	moving.add(glide);
+	node.addEventListener('scroll', glide.onScroll, {passive: true});
+	try {
+		if (typeof start === 'number' && Math.abs(start - from) > 1) node.scrollTo({[property]: start, behavior: 'auto'});
+		node.scrollTo({[property]: target, behavior: 'smooth'});
+		glide.timer = setTimeout(settle, 100);
+	} catch {
+		endGlide(axis, node, glide);
+		node[offset] = target;
+	}
 };
 
 const animate = (node, axis, target, duration, start, ease = easeOutCubic) => {
@@ -94,7 +138,7 @@ const animate = (node, axis, target, duration, start, ease = easeOutCubic) => {
 	if (running) endGlide(axis, node, running);
 	// A glide under way carries on from the offset it last wrote, whatever the browser's own focus scroll has
 	// done to the node since.
-	const from = running ? running.at : (typeof start === 'number' ? start : node[offset]);
+	const from = running ? (running.native ? node[offset] : running.at) : (typeof start === 'number' ? start : node[offset]);
 	const distance = target - from;
 	if (!distance) {
 		node[offset] = target;
@@ -139,6 +183,10 @@ export const glideScroll = (node, axis, target, start, {duration = GLIDE_MS, eas
 	if (!smooth && !ease) {
 		stopScrollAnimation(node);
 		node[offset] = clamped;
+		return clamped;
+	}
+	if (IS_BU8000_BUILD && !ease && typeof node.scrollTo === 'function') {
+		animateNative(node, axis, clamped, start);
 		return clamped;
 	}
 	animate(node, axis, clamped, duration, start, ease);

@@ -10,6 +10,7 @@
 		"lint:css": "node scripts/check-legacy-css.js",
 		"build:webos": "cd packages/build-webos && node build.js",
 		"build:tizen": "cd packages/build-tizen && node scripts/build-wgt.js",
+		"build:bu8000": "cd packages/build-tizen && node scripts/build-wgt.js --bu8000",
 		"build:tizen:all": "cd packages/build-tizen && node scripts/build-all.js",
 		"build:tizen:oblong": "cd packages/build-tizen && node scripts/build-wgt.js --oblong",
 		"build:tizen:legacy": "cd packages/build-tizen && node scripts/build-wgt.js --legacy",

@@ -58,23 +58,17 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import Screensaver from '../components/Screensaver';
 import SeasonalTheme from '../components/SeasonalTheme';
 import NoConnection from '../components/NoConnection/NoConnection';
-import SyncPlayDialog from '../components/SyncPlayDialog';
-import WatchPartyDialog from '../components/WatchPartyDialog';
+import {SyncPlayDialog, WatchPartyDialog, WatchPartyLayer} from '../components/personalPartyUi';
 import useWatchParty from '../hooks/useWatchParty';
 import {onOpenWatchParties, useWatchPartyBackend, useWatchTogetherReturn} from '../hooks/useWatchPartyRooms';
-import WatchPartyLayer from '../components/WatchPartyDialog/WatchPartyLayer';
 import {watchParty, isRoomPlaying} from '../services/siloWatchParty';
 import {extendServerShuffle} from '../services/serverShuffle';
 import {rememberSignInPin, signInPinRemembered, signInPinStillUnlocked} from '../services/serverPinApi';
 import {MaterialIcon} from '../components/icons/materialIcons';
 import PhotoViewer from '../components/PhotoViewer';
 import {isSlideshowVideo, stepIndex, viewerItems} from '../components/PhotoViewer/usePhotoSlideshow';
-import ComicViewer from '../components/ComicViewer';
-import EpubReader from '../components/EpubReader';
-import PdfReader from '../components/PdfReader';
 import AdminMessageDialog from '../components/AdminMessageDialog';
 import {bookReader, isBookItem, supportsNewerBookFormats} from '../utils/books';
-import SettingsPanel from '../components/SettingsPanel';
 import ShuffleOverlay from '../components/ShuffleOverlay';
 import SpottableInput from '../components/SpottableInput/SpottableInput';
 import TVKeyboard from '../components/TVKeyboard/TVKeyboard';
@@ -95,7 +89,11 @@ import {isGameLibrary, refreshGameLibraries, resolveGameLibraryId} from '../util
 import {afterHomeReady} from '../utils/homeReady';
 import {setMusicPlaying} from '../utils/sharedVideoOwner';
 
-const Details = lazy(() => import('../views/Details'));
+// This TV mostly alternates Home and Details. Initialising its small current-layout
+// bundle with the app avoids a second cold script/stylesheet load on the first selection.
+const Details = process.env.REACT_APP_TV_PROFILE === 'bu8000'
+	? require('../views/Details').default
+	: lazy(() => import('../views/Details'));
 const Library = lazy(() => import('../views/Library'));
 const Search = lazy(() => import('../views/Search'));
 const Settings = lazy(() => import('../views/Settings'));
@@ -105,11 +103,11 @@ const Genres = lazy(() => import('../views/Genres'));
 const GenreBrowse = lazy(() => import('../views/GenreBrowse'));
 const LiveTV = lazy(() => import('../views/LiveTV'));
 const Recordings = lazy(() => import('../views/Recordings'));
-const SeerrDiscover = lazy(() => import('../views/SeerrDiscover'));
-const SeerrRequests = lazy(() => import('../views/SeerrRequests'));
-const SeerrBrowse = lazy(() => import('../views/SeerrBrowse'));
-const SeerrPerson = lazy(() => import('../views/SeerrPerson'));
-const SeerrCollection = lazy(() => import('../views/SeerrCollection'));
+const SeerrDiscover = process.env.REACT_APP_TV_PROFILE === 'bu8000' ? () => null : lazy(() => import('../views/SeerrDiscover'));
+const SeerrRequests = process.env.REACT_APP_TV_PROFILE === 'bu8000' ? () => null : lazy(() => import('../views/SeerrRequests'));
+const SeerrBrowse = process.env.REACT_APP_TV_PROFILE === 'bu8000' ? () => null : lazy(() => import('../views/SeerrBrowse'));
+const SeerrPerson = process.env.REACT_APP_TV_PROFILE === 'bu8000' ? () => null : lazy(() => import('../views/SeerrPerson'));
+const SeerrCollection = process.env.REACT_APP_TV_PROFILE === 'bu8000' ? () => null : lazy(() => import('../views/SeerrCollection'));
 const Games = lazy(() => import('../views/Games'));
 const GameSystem = lazy(() => import('../views/GameSystem'));
 const GameDetails = lazy(() => import('../views/GameDetails'));
@@ -117,6 +115,11 @@ const GamePlayer = lazy(() => import('../views/GamePlayer'));
 const SetupWizard = lazy(() => import('../views/SetupWizard'));
 const Calendar = lazy(() => import('../views/Calendar'));
 const CalendarMonth = lazy(() => import('../views/Calendar/CalendarMonth'));
+const SettingsPanel = lazy(() => import('../components/SettingsPanel'));
+// Readers carry archive/PDF engines. Movie browsing must not parse them at startup.
+const ComicViewer = process.env.REACT_APP_TV_PROFILE === 'bu8000' ? () => null : lazy(() => import('../components/ComicViewer'));
+const EpubReader = process.env.REACT_APP_TV_PROFILE === 'bu8000' ? () => null : lazy(() => import('../components/EpubReader'));
+const PdfReader = process.env.REACT_APP_TV_PROFILE === 'bu8000' ? () => null : lazy(() => import('../components/PdfReader'));
 
 import '../styles/perf-overrides.less';
 import css from './App.module.less';
@@ -2324,6 +2327,7 @@ const AppContent = (props) => {
 						<Panel />
 						<Panel>
 							{panelIndex === PANELS.DETAILS && (
+								<Suspense fallback={<PanelLoader />}>
 								<Details
 									itemId={selectedItem?.Id}
 									initialItem={selectedItem}
@@ -2338,10 +2342,12 @@ const AppContent = (props) => {
 									seerrNav={seerrNav}
 									backHandlerRef={backHandlerRef}
 							/>
+								</Suspense>
 							)}
 						</Panel>
 						<Panel>
 							{panelIndex === PANELS.LIBRARY && (
+								<Suspense fallback={<PanelLoader />}>
 								<Library
 								library={selectedLibrary}
 								genreFilter={genreFilter}
@@ -2353,15 +2359,19 @@ const AppContent = (props) => {
 								onSearch={handleOpenSearch}
 									backHandlerRef={backHandlerRef}
 							/>
+								</Suspense>
 							)}
 						</Panel>
 						<Panel>
 							{panelIndex === PANELS.SEARCH && (
+								<Suspense fallback={<PanelLoader />}>
 								<Search remoteSearch={remoteSearch} musicBar={backgroundMusic} preferRequests={searchPrefersRequests} onSelectItem={handleSelectItem} onSelectSeerrItem={handleSelectSeerrItem} onSelectPerson={handleSelectPerson} onSelectGame={handleSelectGame} onPlayChannel={handlePlayChannel} />
+								</Suspense>
 							)}
 						</Panel>
 						<Panel>
 							{panelIndex === PANELS.SETTINGS && (
+								<Suspense fallback={<PanelLoader />}>
 								<Settings
 									onBack={handleBack}
 									onLibrariesChanged={fetchLibraries}
@@ -2369,6 +2379,7 @@ const AppContent = (props) => {
 									onSelectItem={handleSelectItemFromSettings}
 									hasLiveTv={hasLiveTv}
 								/>
+								</Suspense>
 							)}
 						</Panel>
 						{/* The player's place in the panel order. It's drawn after the panels so music can keep playing behind them. */}
@@ -2705,6 +2716,7 @@ const AppContent = (props) => {
 				/>
 			)}
 			{BookReader && (
+				<Suspense fallback={<LoadingSpinner />}>
 				<BookReader
 					item={reading.item}
 					archive={reading.reader.archive}
@@ -2712,6 +2724,7 @@ const AppContent = (props) => {
 					accessToken={accessToken}
 					onClose={handleCloseReader}
 				/>
+				</Suspense>
 			)}
 			<AdminMessageDialog
 				open={!!unreadableBook}
@@ -2755,6 +2768,7 @@ const AppContent = (props) => {
 				</div>
 			)}
 			{showSettingsPanel && (
+				<Suspense fallback={<LoadingSpinner />}>
 				<SettingsPanel
 					initialView={settingsInitialView}
 					onClose={handleCloseSettingsPanel}
@@ -2763,6 +2777,7 @@ const AppContent = (props) => {
 					onSelectItem={handleSelectItemFromSettings}
 					hasLiveTv={hasLiveTv}
 				/>
+				</Suspense>
 			)}
 			<TVKeyboard />
 		</div>

@@ -12,6 +12,19 @@ const deferred = () => {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('createRequestQueue', () => {
+	test('navigation overtakes queued background reads without interrupting active work', async () => {
+		const queue = createRequestQueue(1);
+		const gate = deferred();
+		const order = [];
+		const running = queue.run(() => gate.promise);
+		const background = queue.run(() => { order.push('background'); });
+		const first = queue.run(() => { order.push('detail-1'); }, 1);
+		const second = queue.run(() => { order.push('detail-2'); }, 1);
+		expect(order).toEqual([]);
+		gate.resolve();
+		await Promise.all([running, background, first, second]);
+		expect(order).toEqual(['detail-1', 'detail-2', 'background']);
+	});
 	test('never exceeds the concurrency limit', async () => {
 		const queue = createRequestQueue(2);
 		let running = 0;

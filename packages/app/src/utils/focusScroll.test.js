@@ -1,6 +1,7 @@
-import {cubicBezier, glideScroll, glideToCard, setSmoothScrolling, whenStill} from './focusScroll';
+import {cubicBezier, getScrollPosition, glideScroll, glideToCard, isGliding, setSmoothScrolling, stopScrollAnimation, whenStill} from './focusScroll';
 
 jest.mock('@enact/spotlight', () => ({getPointerMode: () => false}));
+jest.mock('./personalBuild', () => ({IS_BU8000_BUILD: true}));
 
 // A scroller 1000 wide over 3000 of content, its view starting at 0 on screen.
 const lane = (scrollLeft = 0) => {
@@ -125,5 +126,62 @@ describe('focus glides', () => {
 		runFor(300);
 		runFor(16);
 		expect(held).toHaveBeenCalled();
+	});
+
+	it('uses native scrolling on BU8000 without a per-frame JavaScript animation', async () => {
+		const node = lane(0);
+		node.scrollTo = jest.fn();
+		glideScroll(node, 'x', 400, 0);
+		expect(node.scrollTo).toHaveBeenCalledWith({left: 400, behavior: 'smooth'});
+		expect(frames).toHaveLength(0);
+		expect(isGliding(node, 'x')).toBe(true);
+		expect(getScrollPosition(node)).toBe(400);
+		node.scrollLeft = 400;
+		runFor(100);
+		await new Promise((resolve) => setTimeout(resolve, 120));
+		expect(isGliding(node, 'x')).toBe(false);
+	});
+
+	it('cancels a native glide at its actual position before retargeting or stopping', () => {
+		const node = lane(0);
+		node.scrollTo = jest.fn();
+		glideScroll(node, 'x', 400, 0);
+		node.scrollLeft = 120;
+		glideScroll(node, 'x', 700);
+		expect(node.scrollTo).toHaveBeenCalledWith({left: 120, behavior: 'auto'});
+		expect(getScrollPosition(node)).toBe(700);
+		stopScrollAnimation(node);
+		expect(isGliding(node, 'x')).toBe(false);
+		expect(getScrollPosition(node)).toBe(120);
+		expect(frames).toHaveLength(0);
+	});
+
+	it('keeps the timed JavaScript path for a card transition with an explicit curve', () => {
+		const node = lane(0);
+		node.scrollTo = jest.fn();
+		glideScroll(node, 'x', 400, 0, {duration: 180, ease: (t) => t});
+		expect(node.scrollTo).not.toHaveBeenCalled();
+		expect(frames).toHaveLength(1);
+	});
+
+	it('can switch from a native glide to a timed card transition without losing the current offset', () => {
+		const node = lane(0);
+		node.scrollTo = jest.fn();
+		glideScroll(node, 'x', 400, 0);
+		node.scrollLeft = 120;
+		glideScroll(node, 'x', 600, undefined, {duration: 180, ease: (t) => t});
+		expect(node.scrollLeft).toBe(120);
+		runFor(20);
+		expect(node.scrollLeft).toBeGreaterThan(120);
+		runFor(300);
+		expect(node.scrollLeft).toBe(600);
+	});
+
+	it('falls back to a direct landing if the TV rejects native scroll options', () => {
+		const node = lane(0);
+		node.scrollTo = jest.fn(() => { throw new Error('Unsupported'); });
+		glideScroll(node, 'x', 400, 0);
+		expect(node.scrollLeft).toBe(400);
+		expect(isGliding(node, 'x')).toBe(false);
 	});
 });

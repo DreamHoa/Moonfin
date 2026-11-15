@@ -1,3 +1,5 @@
+import {personalLibraries} from './personalBuild';
+
 // Servers do not agree on how to spell the collection type, so it is lowercased
 // before it is compared.
 export const isLiveTvLibrary = (library) =>
@@ -30,6 +32,6 @@ export const channelForProgram = (program) => {
 // hideLiveTv drops it with no button standing in for it, for Kids Mode, where the guide is off
 // limits and the tile would be the way in.
 export const librariesForNav = (libraries, hasLiveTvButton, {hideLiveTv = false} = {}) => {
-	const list = libraries || [];
+	const list = personalLibraries(libraries || []);
 	return (hasLiveTvButton || hideLiveTv) ? list.filter((library) => !isLiveTvLibrary(library)) : list;
 };

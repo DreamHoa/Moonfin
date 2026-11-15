@@ -17,10 +17,11 @@ jest.mock('../../services/blockedContentGate', () => ({
 jest.mock('../../services/parentalControls', () => ({
 	getActiveParentalFilter: () => ({isActive: false}), withoutBlockedItems: (items) => items
 }));
-jest.mock('./parentCollection', () => ({findParentCollections: () => Promise.resolve([])}));
+jest.mock('./parentCollection', () => ({findParentCollections: jest.fn(() => Promise.resolve([]))}));
 
 import * as userDataSync from '../../services/userDataSync';
 import useDetailsItem from './useDetailsItem';
+import {findParentCollections} from './parentCollection';
 
 const SERIES = {Id: 'series', Type: 'Series', Name: 'Show'};
 const episode = (id, userData = {}) => ({Id: id, Type: 'Episode', SeriesId: 'series', UserData: userData});
@@ -65,8 +66,55 @@ const renderSeries = (api) => renderHook(() => useDetailsItem({
 	skip: false
 }));
 
+beforeEach(() => findParentCollections.mockResolvedValue([]));
+
 afterEach(() => {
 	act(() => userDataSync.reset());
+});
+
+describe('detail background work', () => {
+	test('Minimalist video does not scan collections or build recommendations it cannot display', async () => {
+		const api = makeApi(() => Promise.resolve(page([])));
+		api.getItemForDetail.mockResolvedValue({Id: 'movie', Type: 'Movie', Name: 'Movie'});
+		const {unmount} = renderHook(() => useDetailsItem({
+			itemId: 'movie', initialItem: null, effectiveApi: api, effectiveServerUrl: 'https://server',
+			settings: {...SETTINGS, detailScreenStyle: 'v5'}, recommendationsSupported: false,
+			seerrEnabled: false, tagWithServerInfo: identity, skip: false
+		}));
+		await settle();
+		expect(api.getSimilar).not.toHaveBeenCalled();
+		expect(findParentCollections).not.toHaveBeenCalled();
+		// Extras still have a button in Minimalist and must remain available.
+		expect(api.getSpecialFeatures).toHaveBeenCalledTimes(1);
+		unmount();
+	});
+	test('does not request hidden recommendation and extras sections', async () => {
+		const api = makeApi(() => Promise.resolve(page([])));
+		const {unmount} = renderHook(() => useDetailsItem({
+			itemId: 'series', initialItem: null, effectiveApi: api,
+			effectiveServerUrl: 'https://server',
+			settings: {...SETTINGS, hiddenDetailSectionsTv: ['moreLikeThis', 'extras', 'collections']},
+			recommendationsSupported: false, seerrEnabled: false,
+			tagWithServerInfo: identity, skip: false
+		}));
+		await settle();
+		expect(api.getSeasons).toHaveBeenCalledTimes(1);
+		expect(api.getSimilar).not.toHaveBeenCalled();
+		expect(api.getSpecialFeatures).not.toHaveBeenCalled();
+		unmount();
+	});
+
+	test('leaving while episode lists load does not start another wave of requests', async () => {
+		const gate = deferred();
+		const api = makeApi(() => gate.promise);
+		const {unmount} = renderSeries(api);
+		await settle();
+		unmount();
+		gate.resolve(page([]));
+		await settle();
+		expect(api.getSimilar).not.toHaveBeenCalled();
+		expect(api.getSpecialFeatures).not.toHaveBeenCalled();
+	});
 });
 
 describe('a series Next Up', () => {

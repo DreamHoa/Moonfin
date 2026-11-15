@@ -1,4 +1,4 @@
-import {memo, useState, useEffect, useCallback, useRef, useMemo} from 'react';
+import {memo, lazy, useState, useEffect, useCallback, useRef, useMemo} from 'react';
 import $L from '@enact/i18n/$L';
 import Spottable from '@enact/spotlight/Spottable';
 import SpotlightContainerDecorator from '@enact/spotlight/SpotlightContainerDecorator';
@@ -6,10 +6,7 @@ import Spotlight from '@enact/spotlight';
 import {VirtualGridList} from '@enact/sandstone/VirtualList';
 import {useAuth} from '../../context/AuthContext';
 import {createApiForServer} from '../../services/jellyfinApi';
-import MusicBrowse from '../MusicBrowse';
-import MusicCategoryScreen from '../MusicBrowse/MusicCategoryScreen';
 import {musicScreenFor} from '../MusicBrowse/musicScreens';
-import BookBrowse from '../BookBrowse';
 import BackdropLayer from '../../components/BackdropLayer';
 import TileGrid from '../../components/TileGrid';
 import IncompleteBadge from '../../components/IncompleteBadge';
@@ -46,6 +43,11 @@ import {registerThemeSheet} from '../../theme/themeOverrides';
 import css from './Library.module.less';
 
 registerThemeSheet('library', css);
+
+// The parent panel owns Suspense. Video libraries do not need these screens.
+const MusicBrowse = lazy(() => import('../MusicBrowse'));
+const MusicCategoryScreen = lazy(() => import('../MusicBrowse/MusicCategoryScreen'));
+const BookBrowse = process.env.REACT_APP_TV_PROFILE === 'bu8000' ? () => null : lazy(() => import('../BookBrowse'));
 
 const SpottableDiv = Spottable('div');
 const SpottableButton = Spottable('button');

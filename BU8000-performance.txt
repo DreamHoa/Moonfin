@@ -1,0 +1,78 @@
+Samsung BU8000 UI performance build — 2026-11-15
+
+Target and scope
+UA65BU8000GXXP, Tizen 6.5, Chromium 85. The TV's actual user agent and Samsung's specification agree:
+https://developer.samsung.com/smarttv/develop/specifications/web-engine-specifications.html
+Follow-up: BU8000-rendering-audit.txt records the later rendering pass, its final render4 package,
+no-network focus comparison and remaining client stalls. The ui4 numbers below are historical.
+
+Build: npm run build:bu8000 -- --skip-tizen-cli
+Output: Moonfin_Tizen_BU8000_v3.1.0.wgt (unsigned until signed separately).
+Standard platform builds retain their original feature set and browser targets.
+
+The personal build excludes book/comic readers and reader assets, Seerr discovery/request screens,
+and watch-party UI. It disables party backend probing, room polling and SyncPlay startup. Runtime
+overrides prevent old local/server settings reactivating these features without writing those overrides
+back to the shared server profile. Music, live TV, trailers, themes, playback quality and subtitle
+implementation remain available. A new home-cache key prevents restoring removed book rows.
+
+Changes responsible for responsiveness
+- Details requests overtake queued background reads while the existing four-request cap is retained.
+- Departed details do not launch further recommendation/collection work or publish late results.
+- Hidden sections do not fetch their data. Minimalist video pages also skip collections,
+  recommendations and parent-cast reads that their layout never displays; their Extras button is kept.
+- Turning the featured bar off also stops its random-media queries, including during cache restore.
+- Hidden Home stops progressively mounting more rows and resumes when shown again.
+- Settings, music/book browsing and alternative details layouts load on demand.
+- BU8000 initialises the common Details layout with the app, avoiding another cold script/style load
+  when the first title is selected. Other details layouts remain available on demand.
+- A Details Suspense boundary keeps a deferred layout from suspending the whole panel container.
+- The personal compiler target is Chrome 85 instead of Chrome 38/Safari 7.
+
+Device evidence and measurement limits
+Final comparison uses the same six selections/back operations and fourteen left/right moves on the same
+TV and server, with no playback started. The original signed PGS6 package was reinstalled for the
+control. The accepted protocol (v3) reads textContent and the action container's Spotlight-disabled
+attribute; it waits another animation frame after the buttons become enabled. Earlier exploratory
+runs using innerText or only label presence are excluded from the final comparison.
+
+One accepted A/B run:
+                                Original          BU8000 ui4
+Home target movie card in DOM   12210 ms          9081 ms
+First details buttons enabled   7849 ms           1380 ms
+Later details median (5 opens)  982 ms            707 ms
+Metadata requests during run    106               35
+Collection-related child reads  29                0
+Party/SyncPlay requests         4                 0
+Arrow-to-two-RAFs median        88 ms             81 ms
+
+A second ui4 restart/run reproduced Home target readiness at 9539 ms and first details at 1521 ms.
+Its later-details median was 902 ms, with 31 metadata calls and no collection scan. The repeat
+confirms the large first-entry improvement; smaller warm-page differences remain network-sensitive.
+
+These are bounded observations, not universal startup guarantees or a measured frame rate.
+The Home metric means the fixed target card exists, not all artwork is decoded. The arrow metric
+measures scheduling to two RAF callbacks, not physical display latency. Network/cache state varies.
+The first three trial builds reduced unnecessary work but did not fix immediate first-entry latency;
+the eager common Details module is retained only after the fourth build improved that measurement.
+
+The TV reports ARM Mali-G52 through WebGL's renderer extension, not a software renderer identifier.
+This confirms hardware WebGL is available; it does not prove every CSS layer is GPU-rasterised.
+Three public metadata round trips measured 944/419/420 ms, including network, proxy and server time.
+This remaining round trip explains part of the later-page wait and is not a measurement of Wi-Fi alone.
+
+Validation
+130 tests across 11 relevant suites pass; full platform lint/CSS gate and production compilation pass.
+Final main.js: 3147307 bytes, versus the installed baseline's 3972568 bytes (about 21% smaller).
+Book/comic reader assets removed: 2691262 bytes. Removing every locale/feature was not part of scope.
+Signed ui4 package SHA256: 58706b99c789824d562f1836db78efeb8aa08a9221a61aa093c44b70036fc49b.
+Signed package: 7908268 bytes. Its 164 top-level JS/CSS assets match the installed TV package;
+no unexpected old JS/CSS assets remain. App ID and existing author certificate are preserved.
+No TV reboot, firmware change, picture adjustment or subtitle redesign was performed for this work.
+Earlier known PGS missing-composition limitations remain outside this UI optimisation.
+
+Reproduction
+scripts/profile-ui.cjs accepts a running app debugger URL, duration and output JSON path. It records
+temporary long-task/key-to-frame observers, CDP metrics and sanitised request categories, then removes
+the page observers. It does not navigate or play media. Private device benchmark traces and server/
+account identifiers are kept outside the public repository; local profiling JSON is git-ignored.

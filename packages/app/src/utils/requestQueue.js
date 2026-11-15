@@ -39,8 +39,13 @@ export const createRequestQueue = (maxConcurrent = DEFAULT_MAX_CONCURRENT) => {
 	};
 
 	return {
-		run: (task) => new Promise((resolve, reject) => {
-			waiting.push({task, resolve, reject});
+		// User navigation goes ahead of background rows that have not started yet.
+		// Active requests are left alone; equal priorities retain FIFO ordering.
+		run: (task, priority = 0) => new Promise((resolve, reject) => {
+			const entry = {task, resolve, reject, priority};
+			const index = waiting.findIndex((queued) => queued.priority < priority);
+			if (index < 0) waiting.push(entry);
+			else waiting.splice(index, 0, entry);
 			pump();
 		}),
 		inFlight: () => active,

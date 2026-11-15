@@ -5,6 +5,7 @@ import {useSettings} from './SettingsContext';
 import {useAuth} from './AuthContext';
 import {getActiveServer, getAllServersArray} from '../services/multiServerManager';
 import {isPlexServer, registerPlexServer} from '../utils/plexUrls';
+import {SEERR_ENABLED} from '../utils/personalBuild';
 
 const SeerrContext = createContext(null);
 
@@ -66,6 +67,7 @@ export const SeerrProvider = ({children}) => {
 		if (!event || typeof event !== 'object') return;
 
 		if (event.type === 'seerrNotification') {
+			if (!SEERR_ENABLED) return;
 			const title = typeof event.title === 'string' ? event.title : '';
 			const body = typeof event.body === 'string' ? event.body : '';
 			if (title || body) {
@@ -129,6 +131,7 @@ export const SeerrProvider = ({children}) => {
 	useEffect(() => {
 		const init = async () => {
 			try {
+				if (!SEERR_ENABLED) return;
 				let config = await getFromStorage('seerr');
 				// Carry over pre-rename data stored under the old 'jellyseerr' key.
 				if (!config) {
@@ -219,12 +222,12 @@ export const SeerrProvider = ({children}) => {
 		const onPlex = isPlexServer(jellyfinServer);
 		const [firstStatus, pingResult, configResult] = await Promise.all([
 			// An older Moonbase for Plex has no Seerr routes, which is the same as Seerr being off.
-			seerrApi.getMoonfinStatus().catch((e) => {
+			SEERR_ENABLED ? seerrApi.getMoonfinStatus().catch((e) => {
 				if (onPlex) return null;
 				throw e;
-			}),
+			}) : Promise.resolve(null),
 			seerrApi.moonfinPing(jellyfinServer, token).catch(() => null),
-			seerrApi.getMoonfinConfig(jellyfinServer, token).catch(() => null)
+			SEERR_ENABLED ? seerrApi.getMoonfinConfig(jellyfinServer, token).catch(() => null) : Promise.resolve(null)
 		]);
 		// A Plex server without Moonbase for Plex is one without the plugin.
 		if (onPlex && !pingResult) throw new Error('No Moonbase for Plex on this server');
@@ -246,6 +249,7 @@ export const SeerrProvider = ({children}) => {
 		);
 
 		startSettingsStream(jellyfinServer, token);
+		if (!SEERR_ENABLED) return {authenticated: false};
 
 		if (status?.authenticated) {
 			const resolvedAuthType = normalizeMoonfinAuthType(status.authType || savedAuthType);
@@ -414,7 +418,7 @@ export const SeerrProvider = ({children}) => {
 	return (
 		<SeerrContext.Provider value={{
 			// Most Plex servers have no Moonbase for Plex, and Seerr only comes through one that answered.
-			isEnabled: isEnabled && (authServerType !== 'plex' || Boolean(pluginInfo)),
+			isEnabled: SEERR_ENABLED && isEnabled && (authServerType !== 'plex' || Boolean(pluginInfo)),
 			isAuthenticated,
 			isLoading,
 			user,

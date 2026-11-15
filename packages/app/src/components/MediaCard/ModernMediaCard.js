@@ -6,6 +6,7 @@ import RatingsRow from '../RatingsRow';
 import {useSettings} from '../../context/SettingsContext';
 import {getPlatform} from '../../platform';
 import {getPerfTier} from '../../utils/perfTier';
+import {IS_BU8000_BUILD} from '../../utils/personalBuild';
 import {cubicBezier} from '../../utils/focusScroll';
 import {isStaticLibraryCard, modernCardMetrics, getEpisodeLabels, getCardDisplayTitle} from './modernCardLayout';
 import SeerrIcon from '../icons/SeerrIcon';
@@ -145,10 +146,19 @@ const ModernMediaCard = ({
 	const seerrWide = wantsSeerrWide ? seerrWideArtUrl(item, failedThumb) : null;
 
 	const useSeriesThumbnails = settings.useSeriesThumbnails;
-	const restingUrl = useMemo(() => modernCardImageUrl(item, false, {itemServerUrl, isStaticMyMedia, useSeriesThumbnails}),
-		[item, itemServerUrl, isStaticMyMedia, useSeriesThumbnails]);
-	const focusUrl = useMemo(() => modernCardImageUrl(item, true, {itemServerUrl, isStaticMyMedia, seerrWide, useSeriesThumbnails}),
-		[item, itemServerUrl, isStaticMyMedia, seerrWide, useSeriesThumbnails]);
+	const isSquareItem = item?.Type === 'MusicAlbum' || item?.Type === 'Audio';
+	const {imageHeight, expandedWidth, cardWidth} = modernCardMetrics({
+		posterSize: settings.homeRowsPosterSize,
+		isSquareItem,
+		isStatic: isStaticMyMedia
+	});
+	const pixelRatio = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1;
+	const restingWidth = IS_BU8000_BUILD ? cardWidth * pixelRatio : undefined;
+	const focusedWidth = IS_BU8000_BUILD ? (isSquareItem ? cardWidth : expandedWidth) * pixelRatio : undefined;
+	const restingUrl = useMemo(() => modernCardImageUrl(item, false, {itemServerUrl, isStaticMyMedia, useSeriesThumbnails, posterWidth: restingWidth}),
+		[item, itemServerUrl, isStaticMyMedia, useSeriesThumbnails, restingWidth]);
+	const focusUrl = useMemo(() => modernCardImageUrl(item, true, {itemServerUrl, isStaticMyMedia, seerrWide, useSeriesThumbnails, posterWidth: focusedWidth}),
+		[item, itemServerUrl, isStaticMyMedia, seerrWide, useSeriesThumbnails, focusedWidth]);
 
 	const {
 		phase: previewPhase,
@@ -204,14 +214,8 @@ const ModernMediaCard = ({
 		return rawOverview || $L('No description available.');
 	}, [item?.Overview, shouldShowOverview, item?._external]);
 
-	const isSquareItem = item?.Type === 'MusicAlbum' || item?.Type === 'Audio';
 	// A genre card is its name, so it shows it in every row style.
 	const isGenre = item?.Type === 'Genre' || item?.Type === 'MusicGenre';
-	const {imageHeight, expandedWidth, cardWidth} = modernCardMetrics({
-		posterSize: settings.homeRowsPosterSize,
-		isSquareItem,
-		isStatic: isStaticMyMedia
-	});
 	const canRenderExpanded = !isStaticMyMedia && !isSquareItem && (
 		Boolean(metadata || item?.CommunityRating || (shouldShowOverview && overviewText)) ||
 		item?.Type === 'Genre' ||

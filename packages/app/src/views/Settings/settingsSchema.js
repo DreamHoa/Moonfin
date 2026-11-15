@@ -1,4 +1,5 @@
 import $L from '@enact/i18n/$L';
+import {WATCH_PARTY_ENABLED, SEERR_ENABLED, BOOKS_ENABLED} from '../../utils/personalBuild';
 import {isSignInPinEnabled} from '../../utils/signInPin';
 import {isTrickplayOn} from '../../utils/trickplayLayout';
 import {mediaPreviewMode, mediaPreviewSettings} from '../../utils/mediaPreviewMode';
@@ -697,11 +698,11 @@ export const SETTINGS_SCHEMA = [
 					{kind: KIND.NAV, id: 'hideLibraries', label: () => $L('Library Visibility'), desc: () => $L('Toggle home page visibility per library'), icon: 'visibility', action: (ctx) => ctx.actions.openLibraries()},
 					{kind: KIND.NAV, id: 'libraryOrder', label: () => $L('Library Order'), desc: () => $L('Choose the order of your libraries'), icon: 'swap_vert', keywords: () => ['reorder libraries', 'sort libraries', 'my media', 'navbar'], action: (ctx) => ctx.actions.openLibraryOrder()},
 					{kind: KIND.TOGGLE, key: 'unifiedLibraryMode', label: () => $L('Multi-Server Libraries'), desc: () => $L('Show libraries from all connected servers'), icon: 'dns'},
-					{kind: KIND.TOGGLE, key: 'showBookDiscoverTab', label: () => $L('Show Book Library Discovery'), desc: () => $L('Browse titles from Open Library and LibriVox in your book and audiobook libraries'), icon: 'explore'},
-					{kind: KIND.TOGGLE, key: 'bookFoldersAsSeries', label: () => $L('Treat Book Folders as Series'), desc: () => $L('Treat folders containing books as series instead of relying on the individual books\' metadata'), icon: 'auto_stories_outlined'},
+					{kind: KIND.TOGGLE, key: 'showBookDiscoverTab', label: () => $L('Show Book Library Discovery'), desc: () => $L('Browse titles from Open Library and LibriVox in your book and audiobook libraries'), icon: 'explore', when: () => BOOKS_ENABLED},
+					{kind: KIND.TOGGLE, key: 'bookFoldersAsSeries', label: () => $L('Treat Book Folders as Series'), desc: () => $L('Treat folders containing books as series instead of relying on the individual books\' metadata'), icon: 'auto_stories_outlined', when: () => BOOKS_ENABLED},
 					{kind: KIND.SECTION, id: 'libraryView', label: () => $L('Library View')},
 					{kind: KIND.OPTION, key: 'libraryStyle', label: () => $L('Video Library Style'), desc: () => $L('Classic is the original header with a row of icons. Modern puts search, sort, group and filters in one labeled bar. Docked moves them into a panel down the left side.'), options: getLibraryStyleOptions, fallback: () => $L('Classic'), icon: 'view_sidebar'},
-					{kind: KIND.OPTION, key: 'bookLibraryStyle', label: () => $L('Book Library Style'), desc: () => $L("Classic is the original shelves under a featured title. Reading Room leads with what you're reading on large cards. Bookstore browses the whole library in a grid."), options: getBookLibraryStyleOptions, fallback: () => $L('Bookstore'), icon: 'auto_stories_outlined'},
+					{kind: KIND.OPTION, key: 'bookLibraryStyle', label: () => $L('Book Library Style'), desc: () => $L("Classic is the original shelves under a featured title. Reading Room leads with what you're reading on large cards. Bookstore browses the whole library in a grid."), options: getBookLibraryStyleOptions, fallback: () => $L('Bookstore'), icon: 'auto_stories_outlined', when: () => BOOKS_ENABLED},
 					{kind: KIND.OPTION, key: 'musicLibraryStyle', label: () => $L('Music Library Style'), desc: () => $L("Classic is the original rows under a Jump Back In card. Quick Access starts with a grid of your recent albums and playlists. Immersive leads with the album you're listening to."), options: getMusicLibraryStyleOptions, fallback: () => $L('Immersive'), icon: 'queue_music'},
 					{kind: KIND.TOGGLE, key: 'groupItemsIntoCollections', label: () => $L('Group Items into Collections'), desc: () => $L('Hide Collection associated library items when browsing libraries'), icon: 'collections_bookmark'},
 					{kind: KIND.TOGGLE, key: 'showMediaDetailsOnLibraryPage', label: () => $L('Show Media Details'), desc: () => $L('Show details of the selected item at the top of Library pages.'), icon: 'info_outline'},
@@ -1100,6 +1101,7 @@ export const SETTINGS_SCHEMA = [
 			},
 			{
 				id: 'syncPlay',
+				when: () => WATCH_PARTY_ENABLED,
 				icon: 'groups',
 				section: () => $L('Watch Together'),
 				label: () => $L('Watch Parties'),
@@ -1161,6 +1163,7 @@ export const SETTINGS_SCHEMA = [
 		subcategories: [
 			{
 				id: 'seerr',
+				when: () => SEERR_ENABLED,
 				clean: true,
 				icon: 'seerr',
 				label: (ctx) => ctx.seerrLabel,

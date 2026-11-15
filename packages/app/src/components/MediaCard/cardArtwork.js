@@ -84,8 +84,9 @@ export const episodeArtwork = (item, serverUrl, imageType, useSeriesArt) => {
 };
 
 // The art a modern card shows, at rest or focused.
-export const modernCardImageUrl = (item, focused, {itemServerUrl, isStaticMyMedia, seerrWide, useSeriesThumbnails}) => {
+export const modernCardImageUrl = (item, focused, {itemServerUrl, isStaticMyMedia, seerrWide, useSeriesThumbnails, posterWidth}) => {
 	if (!item) return null;
+	const posterOptions = posterWidth ? {maxWidth: Math.ceil(posterWidth), quality: 80} : {maxHeight: 360, quality: 80};
 
 	if (seerrWide) return toAbsoluteImageUrl(seerrWide, itemServerUrl);
 
@@ -114,7 +115,7 @@ export const modernCardImageUrl = (item, focused, {itemServerUrl, isStaticMyMedi
 		// series itself rather than letting a cropped episode still stand in.
 		const seriesPosterId = (item.SeriesPrimaryImageTag && item.SeriesId) || item.ParentPrimaryImageItemId || item.SeriesId;
 		const seriesPoster = seriesPosterId
-			? getImageUrl(itemServerUrl, seriesPosterId, 'Primary', {maxHeight: 360, quality: 80})
+			? getImageUrl(itemServerUrl, seriesPosterId, 'Primary', posterOptions)
 			: null;
 		const seriesThumb = item.ParentThumbItemId
 			? getImageUrl(itemServerUrl, item.ParentThumbItemId, 'Thumb', {tag: item.ParentThumbImageTag, maxWidth: 600, quality: 80})
@@ -148,7 +149,7 @@ export const modernCardImageUrl = (item, focused, {itemServerUrl, isStaticMyMedi
 			}
 		}
 		if (rep.ImageTags?.Primary) {
-			return getImageUrl(repServerUrl, rep.Id, 'Primary', {maxHeight: 360, quality: 80});
+			return getImageUrl(repServerUrl, rep.Id, 'Primary', posterOptions);
 		}
 	}
 
@@ -168,7 +169,7 @@ export const modernCardImageUrl = (item, focused, {itemServerUrl, isStaticMyMedi
 			}
 		}
 		if (item.ImageTags?.Primary) {
-			return getImageUrl(itemServerUrl, item.Id, 'Primary', {tag: item.ImageTags.Primary, maxHeight: 360, quality: 80});
+			return getImageUrl(itemServerUrl, item.Id, 'Primary', {tag: item.ImageTags.Primary, ...posterOptions});
 		}
 	}
 
@@ -183,7 +184,7 @@ export const modernCardImageUrl = (item, focused, {itemServerUrl, isStaticMyMedi
 		}
 
 		if (!isStaticMyMedia && item.ImageTags?.Primary) {
-			return getImageUrl(itemServerUrl, item.Id, 'Primary', {maxHeight: 360, quality: 80});
+			return getImageUrl(itemServerUrl, item.Id, 'Primary', posterOptions);
 		}
 		if (item.ImageTags?.Thumb) {
 			return getImageUrl(itemServerUrl, item.Id, 'Thumb', {maxWidth: 600, quality: 80});
@@ -194,7 +195,7 @@ export const modernCardImageUrl = (item, focused, {itemServerUrl, isStaticMyMedi
 	}
 
 	if (item.Type === 'Audio' && item.AlbumId && item.AlbumPrimaryImageTag) {
-		return getImageUrl(itemServerUrl, item.AlbumId, 'Primary', {maxHeight: 360, quality: 80});
+		return getImageUrl(itemServerUrl, item.AlbumId, 'Primary', posterOptions);
 	}
 
 	if (focused) {
@@ -210,7 +211,7 @@ export const modernCardImageUrl = (item, focused, {itemServerUrl, isStaticMyMedi
 	}
 
 	if (item.ImageTags?.Primary) {
-		return getImageUrl(itemServerUrl, item.Id, 'Primary', {maxHeight: 360, quality: 80});
+		return getImageUrl(itemServerUrl, item.Id, 'Primary', posterOptions);
 	}
 
 	if (externalPoster) {

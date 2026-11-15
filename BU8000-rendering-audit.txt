@@ -1,0 +1,119 @@
+BU8000 rendering and client performance audit — 2026-11-15
+
+Decision
+Moonfin has measurable client-side stalls. Slow Emby responses do not explain all waiting.
+This pass reduces several sources of work; it is not an acceptance claim of stutter-free UI.
+The feature scope in BU8000-performance.txt remains unchanged.
+
+Framework and device
+The installed package uses the production React/Enact build, createRoot, and a Chrome 85 target.
+The actual television is a Samsung BU8000 running Tizen 6.5 / Chromium 85. Its user agent omits
+the Chrome token, so the existing automatic effects policy chooses perf-low. Do not force high
+effects merely because the browser version is 85. WebGL identifies ARM Mali-G52; that establishes
+hardware WebGL availability, not the compositor/rasterisation path of every CSS element.
+Replacing the framework is not justified by the evidence collected in this pass.
+
+Changes
+1. BU8000 ordinary scrolling uses the TV's verified native smooth scroll instead of a JS RAF
+   loop writing offsets every frame. Explicit card-transition curves still use the existing
+   timed implementation. Retargeting, cancellation, fallback and native-to-timed switching
+   are covered by tests. The viewer's smooth-scrolling setting is retained.
+2. Modern rows tell Spotlight that the application owns overflow. This prevents browser focus
+   scrolling from competing with the application's row positioning. Same-row horizontal moves
+   no longer repeat vertical settling when no vertical glide is active.
+3. Browse remembers the intended glide position instead of reading scrollLeft on every native
+   animation event. Focus restoration remains available after Details and library navigation.
+4. Caption width is retained between focused cards. The previous object included the focus ID,
+   causing a second update even when measured width did not change. A regression verifies that
+   the next card receives its measured caption width before another RAF measurement.
+5. BU8000 modern-card posters request their intended width and device pixel ratio. Wide focused
+   thumbs keep their existing resolution. The server/image proxy returns size buckets, so the
+   requested width is not guaranteed to equal naturalWidth. This changes UI artwork only.
+6. Simple Details/Settings returns respect the volatile-row refresh cooldown. A Home remount
+   after playback still forces progress refresh; local user-data updates remain intact.
+7. Library, Search and full-screen Settings receive their own Suspense boundary, as Details
+   already did. Loading a deferred screen need not suspend the entire Panels container.
+8. Settings list and live preview are memoised. Parent pill/scene/search updates need not
+   rebuild unchanged children. Actual prop, context and internal-state updates still render.
+
+Comparable no-network focus measurements
+Same TV, server, resume row, seven Right and seven Left moves. Artwork is warmed first.
+Steady interval: 350 ms. Fast interval: 110 ms. Measurements use an in-page key sequence,
+PerformanceObserver long tasks and RAF intervals, avoiding one CDP round trip per key.
+Both compared focus phases issued zero new requests of any type. All 14 steady keys changed focus.
+
+                                          Previous ui4    Final render4
+Steady: maximum RAF interval                  220 ms          75 ms
+Steady: p95 RAF interval                       44 ms          34 ms
+Steady: long-task cumulative duration         653 ms         245 ms
+Steady: key-to-two-RAFs median                 69 ms          67 ms
+Fast: maximum RAF interval                    135 ms          92 ms
+Fast: long-task cumulative duration           328 ms         164 ms
+Fast: key-to-two-RAFs p95                       96 ms         103 ms
+
+Earlier candidate repeats had steady maxima of 74–96 ms and cumulative tasks of 199–283 ms.
+The smaller key-latency differences are not uniformly improved. Fast p95 RAF remains around
+50 ms. These are scheduling observations, not physical display FPS or remote-input latency.
+The CPU sample located work in scroll writes/reads, native focus and React card rendering.
+The before/after no-request case is direct evidence of a software contribution.
+A final fresh-app repeat measured a 96 ms steady maximum with one image request, so that phase
+is excluded from the zero-request table. Its zero-request fast phase had a 74 ms maximum and
+54 ms cumulative long tasks. Cold artwork warm-up still accumulated 3247 ms of long tasks
+while images arrived; the warmed focus result must not be read as a cold-start smoothness claim.
+
+Other paths and unresolved costs
+- Final full run: four same-title detail readiness times 879/719/756/775 ms. Each main metadata
+  request waited approximately 412–452 ms between sendEnd and receiveHeadersEnd; foreground
+  application queue wait was 0.065–0.47 ms. This is combined server/proxy/network waiting,
+  not proof that Wi-Fi or the Emby process alone caused it. Local work also remains: detail
+  transitions have 253–321 ms maximum RAF intervals; Back has 124–150 ms with zero requests.
+- A six-key vertical-scroll phase had maximum interval 133 ms versus ui4's 223 ms, but its p95
+  and cumulative long tasks did not improve materially (90 ms and 1607 ms final). It requested
+  20 images, not metadata APIs. Do not describe this path as solved or entirely server-limited.
+- Search input appeared after 319 ms in the final full run. This is screen entry only, not a
+  result-query latency benchmark. The local JS/CSS chunks are distinguished from remote APIs.
+- First Settings entry still had a 663 ms maximum interval. Instrumenting Samsung APIs in a
+  separate cold run found one synchronous isSupportedAudioCodec call costing 292 ms, plus
+  shorter product/HDR calls. These are local costs, not Emby latency. A valid warm entry after
+  memoisation accumulated 971 ms of long tasks across its 2.2-second observation window,
+  versus 1267 ms before; category navigation still produces substantial work. A spurious
+  near-zero warm-entry sample was rejected rather than counted as an improvement.
+- Library entry and Home return passed with 35 mounted grid tiles; warm grid readiness was
+  855 ms. Its combined entry/return maximum RAF interval was 499 ms, so this path also retains
+  client work. The initial test incorrectly required independently spottable tiles, whereas
+  this virtual grid focuses its container. That timed-out trial is not an application failure
+  or a usable cold-entry measurement.
+- After 24 detail/back cycles, DOM nodes stayed at 2698 and listeners around 1377–1380, with
+  one document/frame. Post-GC JS heap grew from 17.5 MB to 20.0 MB during initial warm-up;
+  the second 12-cycle batch measured 19.4/19.9/19.9 MB. No continuing node/listener growth
+  was observed in this bounded test; this does not rule out every long-session leak.
+- Loaded-image area after a comparable navigation sequence was 99 MiB of width*height*4
+  versus 232 MiB before, with 149 versus 158 loaded images. This is a theoretical pixel-area
+  estimate, NOT resident RAM, decoded-memory telemetry or an equal-image-set memory benchmark.
+
+Rejected trials and limits
+Removing card compositing hints worsened focus performance and was rejected. Turning off glide
+did not provide a sufficient improvement; the saved preference was not changed. Keeping hidden
+Home laid out with visibility:hidden instead of display:none worsened some detail/back stalls;
+that temporary stylesheet was removed by restarting the app and is not part of the source.
+No themes, trailers, music or live-TV features were removed to obtain these measurements.
+
+The TV accepts CDP Tracing commands but emits no trace events. Page.captureScreenshot also timed
+out. Do not claim a successful trace, compositor proof, screenshot review or visually verified
+60 FPS. CPU samples, metrics, long-task records, request timing and DOM/focus geometry provide
+the available evidence. Fast horizontal/vertical sequences left the focused card within the
+1920x1080 viewport. Private device/account/request details remain outside this repository.
+
+Validation and package
+180 regression tests in 15 relevant suites, plus 138 Settings/preview tests in four suites pass.
+Full application/platform lint, legacy CSS checks and production packaging pass.
+Final signed package: Moonfin_Tizen_BU8000_v3.1.0-render4-signed.wgt, 7908821 bytes.
+SHA256: 2d8c9a51b4c0644a9a10fcab053aa52719b87be741c8793455b3dea28c50efac
+All 165 packaged JS/CSS assets match the build; all 164 top-level TV assets match the package,
+with no unexpected old top-level JS/CSS. App ID, certificate and login are retained.
+Subtitle decoding, native playback and HDR/picture configuration were not changed by this pass.
+The prior unresolved PGS composition issue retains its previous status.
+
+Existing read-only sampler: scripts/profile-ui.cjs. Retain separate metadata-network and frame
+measurements when evaluating future work. The remaining UI costs above must not be excused as
+server waiting merely because the same interaction also makes an HTTP request.

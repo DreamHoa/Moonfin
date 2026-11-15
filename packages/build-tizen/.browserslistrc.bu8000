@@ -1,0 +1,4 @@
+# Samsung BU8000 (2022), Tizen 6.5: Chromium M85.
+# https://developer.samsung.com/smarttv/develop/specifications/web-engine-specifications.html
+# This personal package is not intended for older TV engines.
+chrome 85

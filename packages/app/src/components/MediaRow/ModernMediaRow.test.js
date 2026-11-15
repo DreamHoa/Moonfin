@@ -1,4 +1,5 @@
-import {fireEvent, render} from '@testing-library/react';
+import {act, fireEvent, render} from '@testing-library/react';
+import Spotlight from '@enact/spotlight';
 
 import ModernMediaRow from './ModernMediaRow';
 
@@ -15,7 +16,8 @@ jest.mock('react/jsx-dev-runtime', () => {
 	};
 });
 // Pointer mode keeps the row from reaching for layout that jsdom doesn't have.
-jest.mock('@enact/spotlight', () => ({focus: jest.fn(() => true), getPointerMode: () => true}));
+jest.mock('@enact/spotlight', () => ({focus: jest.fn(() => true), getPointerMode: jest.fn(() => true)}));
+jest.mock('../../utils/focusScroll', () => ({glideScroll: (node, axis, target) => target}));
 jest.mock('@enact/spotlight/SpotlightContainerDecorator', () => (config, type) => {
 	const React = require('react');
 	return React.forwardRef(({spotlightId, ...props}, ref) => React.createElement(type, {...props, ref, 'data-spotlight-id': spotlightId}));
@@ -26,9 +28,9 @@ jest.mock('../Skeleton', () => ({SkeletonHomeRow: () => null, SkeletonRowTitle: 
 // Like the real card, each one leaves an element beside it in the lane and reports its focus.
 jest.mock('../MediaCard/ModernMediaCard', () => {
 	const React = require('react');
-	return ({item, spotlightId, hideOverview, warmFocusArt, onFocused, carousel}) => React.createElement(React.Fragment, null,
-		React.createElement('div', {className: 'spottable', tabIndex: -1, 'data-spotlight-id': spotlightId, 'data-hide-overview': String(hideOverview), 'data-warm': String(warmFocusArt), 'data-carousel': String(carousel), onFocus: () => onFocused(item.Id)}, item.Name),
-		React.createElement('div'));
+	return {__esModule: true, expandMs: () => 0, default: ({item, spotlightId, hideOverview, warmFocusArt, detailsWidth, onFocused, carousel}) => React.createElement(React.Fragment, null,
+		React.createElement('div', {className: 'spottable', tabIndex: -1, style: {width: 160}, onFocus: () => onFocused(item.Id), 'data-details-width': detailsWidth, 'data-spotlight-id': spotlightId, 'data-hide-overview': String(hideOverview), 'data-warm': String(warmFocusArt), 'data-carousel': String(carousel)}, item.Name),
+		React.createElement('div'))};
 });
 jest.mock('./CarouselPanel', () => {
 	const React = require('react');
@@ -47,6 +49,30 @@ const find = (selector) => document.querySelector(selector);
 const focusCard = (index) => fireEvent.focus(document.querySelectorAll('.spottable')[index]);
 
 describe('ModernMediaRow', () => {
+	it('keeps the measured caption width on the next focused card before measuring again', () => {
+		Spotlight.getPointerMode.mockReturnValue(false);
+		const frames = [];
+		const raf = jest.spyOn(window, 'requestAnimationFrame').mockImplementation(cb => {frames.push(cb); return frames.length;});
+		const {unmount} = draw();
+		try {
+			const cards = document.querySelectorAll('.spottable');
+			Object.defineProperty(cards[0].parentNode.parentNode, 'clientWidth', {value: 1000});
+			focusCard(0);
+			act(() => frames.shift()());
+			expect(cards[0].getAttribute('data-details-width')).toBe('1000');
+			focusCard(1);
+			// The new card must not first render a narrow caption and expand a frame later.
+			expect(cards[1].getAttribute('data-details-width')).toBe('1000');
+			expect(cards[0].hasAttribute('data-details-width')).toBe(false);
+			act(() => frames.shift()());
+			expect(cards[1].getAttribute('data-details-width')).toBe('1000');
+		} finally {
+			unmount();
+			raf.mockRestore();
+			Spotlight.getPointerMode.mockReturnValue(true);
+		}
+	});
+
 	it('keeps the row spotlight id Home uses unless it is handed one', () => {
 		const {unmount} = draw();
 		expect(find('[data-row-index="2"]').getAttribute('data-spotlight-id')).toBe('row-2');

@@ -11,6 +11,7 @@
  *   --legacy               - Target Tizen 2.4 (strips Smart Hub Preview service
  *                            and Tizen 4+ metadata from config.xml)
  *   --oblong               - Use oblong (1920x1080) launcher icon instead of square
+ *   --bu8000               - Personal build without books/comics, watch parties or Seerr requests
  *
  * Environment overrides (all optional, for installs in unusual places):
  *   TIZEN_CLI              - Full path to tizen / tizen.bat
@@ -41,6 +42,7 @@ const isLegacy = args.includes('--legacy');
 const isOblong = args.includes('--oblong');
 const skipTizenCLI = args.includes('--skip-tizen-cli') || process.env.CI_SKIP_TIZEN_CLI === '1' || process.env.CI === 'true';
 const skipLint = args.includes('--skip-lint');
+const isBU8000 = args.includes('--bu8000');
 
 // ── Optional version bump: npm run build:tizen -- 2.3.0 ──
 const versionArg = args.find(a => /^\d+\.\d+\.\d+$/.test(a));
@@ -388,7 +390,7 @@ async function main() {
 
 	log(`Building Enact app (${isDev ? 'development' : 'production'})...`);
 	const packCmd = isDev ? 'npx enact pack' : 'npx enact pack -p';
-	const browserslistConfig = path.join(ROOT, '.browserslistrc');
+	const browserslistConfig = path.join(ROOT, isBU8000 ? '.browserslistrc.bu8000' : '.browserslistrc');
 	const enactAlias = JSON.stringify({
 		'@moonfin/platform-webos': path.resolve(ROOT, '..', 'platform-webos', 'src'),
 		'@moonfin/platform-tizen': path.resolve(ROOT, '..', 'platform-tizen', 'src'),
@@ -403,7 +405,8 @@ async function main() {
 		CI: 'false',
 		BROWSERSLIST_CONFIG: browserslistConfig,
 		ENACT_ALIAS: enactAlias,
-		REACT_APP_VERSION: appPkg.version
+		REACT_APP_VERSION: appPkg.version,
+		REACT_APP_TV_PROFILE: isBU8000 ? 'bu8000' : ''
 	};
 	if (!run(packCmd, { cwd: APP_DIR, env: buildEnv })) {
 		error('Enact build failed!');
@@ -454,7 +457,8 @@ async function main() {
 		}
 	}
 
-	copyReaderAssets(DIST, success);
+	if (!isBU8000) copyReaderAssets(DIST, success);
+	else success('BU8000: excluded book/comic reader engines and assets');
 
 	// The renderer asks for this by name whenever a style names a font the file does not
 	// carry, and it throws the whole track away when it cant be fetched.
@@ -620,7 +624,7 @@ async function main() {
 	// Step 6 & 7: Determine output filename and clean previous output
 	const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 	const version = pkg.version || '0.0.0';
-	const typeName = isLegacy ? 'Legacy' : isOblong ? 'Oblong' : 'Regular';
+	const typeName = isBU8000 ? 'BU8000' : isLegacy ? 'Legacy' : isOblong ? 'Oblong' : 'Regular';
 	const wgtName = `Moonfin_Tizen_${typeName}_v${version}.wgt`;
 	const finalWgt = path.join(REPO_ROOT, wgtName);
 
