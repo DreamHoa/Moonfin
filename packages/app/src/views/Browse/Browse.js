@@ -41,7 +41,8 @@ import {buildBrowseRows, sameRowList} from './buildBrowseRows';
 import {markHomeReady} from '../../utils/homeReady';
 import {homeBackdropStyle} from '../../utils/homeBackdropStyle';
 import {rem} from '../../utils/rootScale';
-import {glideScroll, isGliding, smoothScrollingOn, stopScrollAnimation} from '../../utils/focusScroll';
+import {getScrollPosition, glideScroll, isGliding, smoothScrollingOn, stopScrollAnimation} from '../../utils/focusScroll';
+import {IS_BU8000_BUILD} from '../../utils/personalBuild';
 import {homeRowSpacing, rowImageType, rowPeekHeight} from './rowPeek';
 
 import css from './Browse.module.less';
@@ -137,6 +138,7 @@ const Browse = ({
 	const detailSectionRef = useRef(null);
 	const lastFocusedRowRef = useRef(null);
 	const wasVisibleRef = useRef(true);
+	const firstVisibleRef = useRef(true);
 	const prevFilteredRowsRef = useRef([]);
 	const filteredRowsRef = useRef([]);
 	const rowRefsMap = useRef(new Map());
@@ -507,7 +509,7 @@ const Browse = ({
 		const scrolls = scrollsRef.current;
 		if (!rows) return undefined;
 		const note = (event) => {
-			if (isVisibleRef.current) scrolls.set(event.target, event.target.scrollLeft);
+			if (isVisibleRef.current) scrolls.set(event.target, getScrollPosition(event.target));
 		};
 		rows.addEventListener('scroll', note, true);
 		return () => {
@@ -536,6 +538,8 @@ const Browse = ({
 			return;
 		}
 		if (isLoading || !hasFocusableRow) return;
+		const firstVisible = firstVisibleRef.current;
+		firstVisibleRef.current = false;
 		// Home is built again after sign in and playback, so the ref that marks a first run starts
 		// over with it. A place to return to is what tells the two apart.
 		if (wasVisibleRef.current && lastFocusState === null) return;
@@ -545,7 +549,9 @@ const Browse = ({
 		});
 
 		fetchFreshFeaturedItems();
-		refreshVolatileData(true);
+		// A mount after playback needs fresh progress; a simple Details/Settings return
+		// keeps the existing cooldown instead of forcing the same requests every time.
+		refreshVolatileData(IS_BU8000_BUILD ? firstVisible : true);
 
 		// The first row is somewhere the user was too, so it comes back like any other rather than
 		// handing the screen to the banner.
@@ -789,7 +795,9 @@ const Browse = ({
 			pinMainScroll();
 			return;
 		}
-		settleRow(rowIndex, rowChanged ? 2 : 1, contentRowsRef.current?.scrollTop);
+		if (!IS_BU8000_BUILD || rowChanged || isGliding(contentRowsRef.current, 'y')) {
+			settleRow(rowIndex, rowChanged ? 2 : 1, contentRowsRef.current?.scrollTop);
+		}
 	}, [setBrowseMode, pinMainScroll, settleRow, loadSectionsNear]);
 
 	const backdropTimerRef = useRef(null);

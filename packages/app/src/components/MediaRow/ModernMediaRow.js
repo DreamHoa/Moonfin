@@ -7,6 +7,7 @@ import {KEYS} from '../../utils/keys';
 import {sameCardUserData} from '../../utils/playedState';
 import {useSettings} from '../../context/SettingsContext';
 import {getPlatform} from '../../platform';
+import {IS_BU8000_BUILD} from '../../utils/personalBuild';
 import {MODERN_CAPTION_ROOM, modernCardMetrics} from '../MediaCard/modernCardLayout';
 import PlaceholderRow from './PlaceholderRow';
 import CalendarSeeAllCard from './CalendarSeeAllCard';
@@ -24,7 +25,10 @@ const seeAllSize = (posterSize) => {
 };
 
 const RowContainer = SpotlightContainerDecorator({
-	enterTo: 'last-focused'
+	enterTo: 'last-focused',
+	// Both axes are managed by the row and Browse. Native focus scrolling otherwise
+	// moves the same containers before these handlers can restore their positions.
+	overflow: IS_BU8000_BUILD
 }, 'div');
 
 const ModernMediaRow = ({
@@ -166,10 +170,9 @@ const ModernMediaRow = ({
 					glideScroll(scroller, 'x', cardStart, start, {duration: openMs, ease: expandEase}) :
 					glideScroll(scroller, 'x', cardStart, layout.paddingLeft + cardStart - shownAt);
 				const cardLeft = layout.paddingLeft + cardStart - rest;
-				setDetails({
-					spotlightId: card.getAttribute('data-spotlight-id'),
-					width: layout.width - layout.paddingRight - cardLeft
-				});
+				// Keep the measured width when focus moves. Most cards park at the
+				// same leading edge; replacing an object here rendered them twice.
+				setDetails(layout.width - layout.paddingRight - cardLeft);
 			});
 		}
 	}, [onFocus, rowIndex, onLoadMore, itemCount, rowId, settings.modernCardTransitionSpeed]);
@@ -298,7 +301,7 @@ const ModernMediaRow = ({
 								onSpotlightLeft={isFirst ? handleWrapLeft : null}
 								onSpotlightRight={isLast ? handleWrapRight : null}
 								isFocused={focusedItemId === item.Id}
-								detailsWidth={details?.spotlightId === spotlightId ? details.width : undefined}
+								detailsWidth={focusedItemId === item.Id ? details ?? undefined : undefined}
 								isLibraryRow={rowId === 'library-tiles'}
 								warmFocusArt={besideFocus}
 								menuOptions={menuOptions}

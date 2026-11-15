@@ -1,5 +1,5 @@
 /* eslint-disable react/jsx-no-bind */
-import {Suspense, lazy, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import {Suspense, lazy, memo, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import $L from '@enact/i18n/$L';
 import Spottable from '@enact/spotlight/Spottable';
 import SpotlightContainerDecorator from '@enact/spotlight/SpotlightContainerDecorator';
@@ -315,4 +315,5 @@ const SettingsLivePreview = ({scene, row, trying, onPickScene, onLeaveChips, has
 	);
 };
 
-export default SettingsLivePreview;
+// Editing the list's search field must not rebuild an unchanged preview scene.
+export default memo(SettingsLivePreview);

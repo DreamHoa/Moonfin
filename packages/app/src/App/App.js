@@ -2347,6 +2347,7 @@ const AppContent = (props) => {
 						</Panel>
 						<Panel>
 							{panelIndex === PANELS.LIBRARY && (
+								<Suspense fallback={<PanelLoader />}>
 								<Library
 								library={selectedLibrary}
 								genreFilter={genreFilter}
@@ -2358,15 +2359,19 @@ const AppContent = (props) => {
 								onSearch={handleOpenSearch}
 									backHandlerRef={backHandlerRef}
 							/>
+								</Suspense>
 							)}
 						</Panel>
 						<Panel>
 							{panelIndex === PANELS.SEARCH && (
+								<Suspense fallback={<PanelLoader />}>
 								<Search remoteSearch={remoteSearch} musicBar={backgroundMusic} preferRequests={searchPrefersRequests} onSelectItem={handleSelectItem} onSelectSeerrItem={handleSelectSeerrItem} onSelectPerson={handleSelectPerson} onSelectGame={handleSelectGame} onPlayChannel={handlePlayChannel} />
+								</Suspense>
 							)}
 						</Panel>
 						<Panel>
 							{panelIndex === PANELS.SETTINGS && (
+								<Suspense fallback={<PanelLoader />}>
 								<Settings
 									onBack={handleBack}
 									onLibrariesChanged={fetchLibraries}
@@ -2374,6 +2379,7 @@ const AppContent = (props) => {
 									onSelectItem={handleSelectItemFromSettings}
 									hasLiveTv={hasLiveTv}
 								/>
+								</Suspense>
 							)}
 						</Panel>
 						{/* The player's place in the panel order. It's drawn after the panels so music can keep playing behind them. */}
