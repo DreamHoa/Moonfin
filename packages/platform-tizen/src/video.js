@@ -356,7 +356,7 @@ export const getMimeType = (container) => {
 // Tizen keeps the server extracted sidecar for now: the in band reader is not wired
 // into the Tizen renderer here, and silently dropping the delivery url would leave
 // PGS with nothing to render.
-export const canRenderEmbeddedPgsInBand = () => false;
+export const canRenderEmbeddedPgsInBand = () => true;
 
 export const setDisplayWindow = async (rect) => {
 	if (!isAVPlayAvailable) return false;

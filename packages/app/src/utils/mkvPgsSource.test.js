@@ -213,6 +213,17 @@ const ptsOf = (bytes) => {
 	return times;
 };
 
+const readThrough = async (reader, timeMs) => {
+	const chunks = [];
+	for (let i = 0; i < 100; i++) {
+		const {value, done} = await reader.read();
+		if (done) break;
+		chunks.push(value);
+		if (ptsOf(value).some(t => t >= timeMs * 90)) break;
+	}
+	return join(chunks);
+};
+
 describe('mkvPgsSource', () => {
 	afterEach(() => {
 		delete global.fetch;
@@ -331,8 +342,9 @@ describe('mkvPgsSource', () => {
 		serveFile(buildFile({subtitleTimes: [1000, 40000], fillerBytes: 32}));
 		const source = openSource({getTime: () => 2, startTime: 2, lookaheadSeconds: 5});
 		await source.ready;
-		const first = await source.readable.getReader().read();
-		expect([...new Set(ptsOf(first.value))]).toEqual([1000 * 90, 40000 * 90]);
+		const bytes = await readThrough(source.readable.getReader(), 40000);
+		expect([...new Set(ptsOf(bytes))]).toEqual([1000 * 90, 40000 * 90]);
+		source.dispose();
 	});
 
 	test('falls back when a cue has no relative position', async () => {
@@ -357,10 +369,181 @@ describe('mkvPgsSource', () => {
 		warn.mockRestore();
 	});
 
+	test('bypasses the HTTP cache for subtitle ranges sharing the native video URL', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000], fillerBytes: 32}));
+		const source = openSource({lookaheadSeconds: 10});
+		try {
+			expect(await source.ready).toBe(true);
+			await readAll(source);
+			expect(global.fetch.mock.calls.length).toBeGreaterThan(3);
+			for (const [, init] of global.fetch.mock.calls) expect(init.cache).toBe('no-store');
+		} finally { source.dispose(); }
+	});
+
+	test('validates the target-position subtitle instead of an unrelated broken first cue', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32, brokenIndex: 0}));
+		const source = openSource({getTime: () => 2.5, startTime: 2.5});
+		try {
+			expect(await source.ready).toBe(true);
+			expect([...new Set(ptsOf(await readAll(source)))]).toEqual([2000 * 90, 3000 * 90]);
+		} finally { source.dispose(); }
+	});
+
+	test('reuses the playback index after decoder disposal but reads fresh target data', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32}));
+		const indexCache = {};
+		const first = openSource({indexCache});
+		expect(await first.ready).toBe(true);
+		await readAll(first);
+		first.dispose();
+		global.fetch.mockClear();
+		const second = openSource({indexCache, startTime: 2.5, getTime: () => 2.5});
+		try {
+			expect(await second.ready).toBe(true);
+			expect([...new Set(ptsOf(await readAll(second)))]).toEqual([2000 * 90, 3000 * 90]);
+			expect(global.fetch.mock.calls.length).toBeGreaterThan(0);
+			expect(global.fetch.mock.calls.some(([, init]) => init.headers.Range.startsWith('bytes=0-'))).toBe(false);
+		} finally { second.dispose(); }
+	});
+
+	test('does not reuse an index for a different URL or subtitle ordinal', async () => {
+		serveFile(buildFile({subtitleTimes: [1000], fillerBytes: 32}));
+		const indexCache = {};
+		const first = openSource({indexCache});
+		expect(await first.ready).toBe(true);
+		await readAll(first);
+		first.dispose();
+		global.fetch.mockClear();
+		const otherUrl = openSource({indexCache, streamUrl: 'http://server/other'});
+		expect(await otherUrl.ready).toBe(true);
+		await readAll(otherUrl);
+		otherUrl.dispose();
+		expect(global.fetch.mock.calls.some(([, init]) => init.headers.Range.startsWith('bytes=0-'))).toBe(true);
+		global.fetch.mockClear();
+		const otherTrack = openSource({indexCache, streamUrl: 'http://server/other', subtitleOrdinal: 1});
+		expect(await otherTrack.ready).toBe(false);
+		otherTrack.dispose();
+		expect(global.fetch.mock.calls.some(([, init]) => init.headers.Range.startsWith('bytes=0-'))).toBe(true);
+	});
+
+	test('delivers an ordered current composition while a future block is stalled', async () => {
+		const bytes = buildFile({subtitleTimes: [1000, 2000], fillerBytes: 32});
+		const header = parseHeader(bytes);
+		const ce = splitElement(bytes, header.segmentDataOffset + header.cuesOffset);
+		const cues = parseCues(bytes, ce.bodyStart, ce.bodyEnd - ce.bodyStart, 2);
+		const cluster = splitElement(bytes, header.segmentDataOffset + cues[1].clusterPosition);
+		const delayedBlock = cluster.bodyStart + cues[1].relativePosition;
+		serveFile(bytes);
+		const fetchFile = global.fetch;
+		let release;
+		const delayed = new Promise(resolve => { release = resolve; });
+		global.fetch = jest.fn(async (url, init) => {
+			if (Number(/bytes=(\d+)/.exec(init.headers.Range)[1]) === delayedBlock) await delayed;
+			return fetchFile(url, init);
+		});
+		const source = openSource();
+		let timer;
+		try {
+			expect(await source.ready).toBe(true);
+			const reader = source.readable.getReader();
+			const first = await Promise.race([reader.read(), new Promise(resolve => { timer = setTimeout(() => resolve(null), 500); })]);
+			expect(first).not.toBeNull();
+			expect([...new Set(ptsOf(first.value))]).toEqual([1000 * 90]);
+			release();
+			expect([...new Set(ptsOf((await reader.read()).value))]).toEqual([2000 * 90]);
+		} finally { clearTimeout(timer); release(); source.dispose(); }
+	});
+
+	test.each([20000, 60000])('coalesces a %i byte composition and reuses target validation', async (payloadLength) => {
+		const bytes = buildFile({subtitleTimes: [1000], fillerBytes: 32, subtitlePayloadBytes: payloadLength});
+		const header = parseHeader(bytes);
+		const ce = splitElement(bytes, header.segmentDataOffset + header.cuesOffset);
+		const [cue] = parseCues(bytes, ce.bodyStart, ce.bodyEnd - ce.bodyStart, 2);
+		const cluster = splitElement(bytes, header.segmentDataOffset + cue.clusterPosition);
+		const blockStart = cluster.bodyStart + cue.relativePosition;
+		const ranges = [];
+		serveFile(bytes, {ranges});
+		const source = openSource({getTime: () => 1, startTime: 1});
+		try {
+			expect(await source.ready).toBe(true);
+			expect((await readAll(source)).length).toBeGreaterThan(payloadLength);
+			expect(ranges.filter(([start]) => start >= blockStart && start < blockStart + payloadLength)).toHaveLength(payloadLength < 32768 ? 1 : 2);
+		} finally { source.dispose(); }
+	});
+
+	test('a persistently failing cue does not block later subtitles indefinitely', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32}));
+		const fetchFile = global.fetch;
+		const source = openSource({lookaheadSeconds: 10});
+		expect(await source.ready).toBe(true);
+		let blockedRange;
+		global.fetch = jest.fn(async (url, init) => {
+			const match = /bytes=(\d+)-(\d+)/.exec(init.headers.Range);
+			if (!blockedRange && Number(match[2]) - Number(match[1]) === 32767) blockedRange = init.headers.Range;
+			if (init.headers.Range === blockedRange) return {status: 503};
+			return fetchFile(url, init);
+		});
+		const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+		let timer;
+		try {
+			const bytes = await Promise.race([readAll(source), new Promise(resolve => { timer = setTimeout(() => resolve(null), 1800); })]);
+			expect(bytes).not.toBeNull();
+			expect([...new Set(ptsOf(bytes))]).toEqual([1000 * 90, 3000 * 90]);
+		} finally { clearTimeout(timer); source.dispose(); warn.mockRestore(); }
+	});
+
 	test('retries a range request the server failed once', async () => {
 		serveFile(buildFile({subtitleTimes: [1000], fillerBytes: 32}), {failFirstWith: 503});
 		const source = openSource();
 		expect(await source.ready).toBe(true);
+	});
+
+	test('reads past the prefetch window to finish its last display set before it is due', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 14000, 40000], fillerBytes: 32}));
+		const source = openSource({lookaheadSeconds: 15});
+		await source.ready;
+		const bytes = await readThrough(source.readable.getReader(), 40000);
+		expect([...new Set(ptsOf(bytes))]).toEqual([1000 * 90, 14000 * 90, 40000 * 90]);
+		source.dispose();
+	});
+
+	test('retries a failed response body instead of losing a subtitle', async () => {
+		serveFile(buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32}));
+		const fetchFile = global.fetch;
+		let failedRange;
+		let failures = 0;
+		global.fetch = jest.fn(async (url, init) => {
+			const response = await fetchFile(url, init);
+			// Fail a later block probe, after header validation has succeeded.
+			const range = init.headers.Range;
+			const [, start, end] = /bytes=(\d+)-(\d+)/.exec(range);
+			if (!failedRange && Number(end) - Number(start) === 32767 && fetchFile.mock.calls.length > 5) failedRange = range;
+			if (range === failedRange && failures++ < 2) {
+				return {...response, arrayBuffer: async () => { throw new Error('connection reset during body'); }};
+			}
+			return response;
+		});
+		const source = openSource({lookaheadSeconds: 10});
+		expect(await source.ready).toBe(true);
+		expect([...new Set(ptsOf(await readAll(source)))]).toEqual([1000 * 90, 2000 * 90, 3000 * 90]);
+		expect(failures).toBe(3);
+	});
+
+	test('times out a stalled response body and retries it', async () => {
+		serveFile(buildFile({subtitleTimes: [1000], fillerBytes: 32}));
+		const fetchFile = global.fetch;
+		let stalled = false;
+		global.fetch = jest.fn(async (url, init) => {
+			const response = await fetchFile(url, init);
+			if (!stalled) {
+				stalled = true;
+				return {...response, arrayBuffer: () => new Promise(() => {})};
+			}
+			return response;
+		});
+		const source = openSource({fetchTimeoutMs: 10});
+		expect(await source.ready).toBe(true);
+		expect([...new Set(ptsOf(await readAll(source)))]).toEqual([1000 * 90]);
 	});
 
 	test('jumps the cursor to the playhead after a seek forward', async () => {
@@ -369,17 +552,17 @@ describe('mkvPgsSource', () => {
 		const source = openSource({getTime: () => time, lookaheadSeconds: 5});
 		await source.ready;
 		const reader = source.readable.getReader();
-		expect([...new Set(ptsOf((await reader.read()).value))]).toEqual([1000 * 90, 2000 * 90]);
+		expect([...new Set(ptsOf(await readThrough(reader, 10000)))]).toEqual([1000 * 90, 2000 * 90, 10000 * 90]);
 		time = 30;
-		// 10s and 20s are over by now, so they are never read.
-		expect([...new Set(ptsOf((await reader.read()).value))]).toEqual([30000 * 90, 31000 * 90]);
+		// The 10s cue was prefetched to complete the 2s cue; the 20s cue is skipped by the seek.
+		expect([...new Set(ptsOf(await readThrough(reader, 31000)))]).toEqual([30000 * 90, 31000 * 90]);
 		expect((await reader.read()).done).toBe(true);
 		expect(source.needsRestart(25)).toBe(true);
 		expect(source.needsRestart(29.5)).toBe(false);
 	});
 
 	test('fetches only the unread tail of a large SimpleBlock', async () => {
-		const bytes = buildFile({subtitleTimes: [1000], fillerBytes: 32, subtitlePayloadBytes: 4096});
+		const bytes = buildFile({subtitleTimes: [1000], fillerBytes: 32, subtitlePayloadBytes: 60000});
 		const ranges = [];
 		serveFile(bytes, {ranges});
 		const source = createInBandPgsSource({
@@ -390,20 +573,20 @@ describe('mkvPgsSource', () => {
 		});
 		await source.ready;
 		const out = await readAll(source);
-		expect(out.length).toBeGreaterThan(4096);
+		expect(out.length).toBeGreaterThan(60000);
 
-		// Once a 64-byte block probe has been made, the follow-up starts exactly
+		// Once a 32-KiB block probe has been made, the follow-up starts exactly
 		// after it instead of downloading those bytes again.
 		const contiguous = ranges.some((range, index) => {
 			if (index === 0 || !range) return false;
 			const previous = ranges[index - 1];
-			return previous && previous[1] - previous[0] + 1 === 64 && range[0] === previous[1] + 1;
+			return previous && previous[1] - previous[0] + 1 === 32768 && range[0] === previous[1] + 1;
 		});
 		expect(contiguous).toBe(true);
 	});
 
 	test('reads a small share of the file rather than all of it', async () => {
-		const bytes = buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 200 * 1024});
+		const bytes = buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 2000 * 1024});
 		const ranges = [];
 		serveFile(bytes, {ranges});
 		const source = createInBandPgsSource({

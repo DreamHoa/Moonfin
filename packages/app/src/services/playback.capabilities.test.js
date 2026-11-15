@@ -2,6 +2,8 @@ import * as playback from './playback';
 import * as jellyfinApi from './jellyfinApi';
 import {getDeviceCapabilities, getDeviceProfile} from './deviceProfile';
 import {linkBitrate} from './linkBitrate';
+import {isTizen} from '../platform';
+import {canRenderEmbeddedPgsInBand} from './video';
 
 jest.mock('./jellyfinApi', () => {
 	const server = {getPlaybackInfo: jest.fn(), closeLiveStream: jest.fn(), reportPlaybackStopped: jest.fn()};
@@ -26,13 +28,13 @@ jest.mock('./video', () => ({
 	getPlayMethod: () => 'DirectPlay',
 	getMimeType: () => 'video/mp4',
 	isAudioStreamPlayable: () => true,
-	canRenderEmbeddedPgsInBand: () => false,
+	canRenderEmbeddedPgsInBand: jest.fn(() => false),
 	rendersSubtitleInHost: () => false
 }));
 jest.mock('./storage', () => ({getFromStorage: async () => ({})}));
 jest.mock('./serverLogger', () => ({serverLogger: {playback: jest.fn()}}));
 jest.mock('./systemVolume', () => ({getVolumeState: jest.fn(), lastVolumeState: () => null}));
-jest.mock('../platform', () => ({isVega: () => false, isXbox: () => false, isTizen: () => false}));
+jest.mock('../platform', () => ({isVega: () => false, isXbox: () => false, isTizen: jest.fn(() => false)}));
 
 const {api} = jellyfinApi;
 const movie = {Id: 'movie-1', Type: 'Movie'};
@@ -40,12 +42,50 @@ const movie = {Id: 'movie-1', Type: 'Movie'};
 beforeEach(async () => {
 	await playback.reportStop(0);
 	jest.clearAllMocks();
+	isTizen.mockReturnValue(false);
+	canRenderEmbeddedPgsInBand.mockReturnValue(false);
 	jest.spyOn(console, 'log').mockImplementation(() => {});
 	api.reportPlaybackStopped.mockResolvedValue(null);
 	getDeviceProfile.mockResolvedValue({});
 	api.getPlaybackInfo.mockResolvedValue({
 		PlaySessionId: 'session',
 		MediaSources: [{Id: 'source', SupportsDirectPlay: true, Container: 'mkv', MediaStreams: []}]
+	});
+});
+
+describe('embedded MKV subtitles on Tizen', () => {
+	const subtitles = [
+		{Type: 'Subtitle', Index: 2, Codec: 'hdmv_pgs_subtitle', Language: 'chi', DeliveryMethod: 'Embed', IsExternal: false},
+		{Type: 'Subtitle', Index: 3, Codec: 'ass', Language: 'chi', DeliveryMethod: 'Embed', IsExternal: false},
+		{Type: 'Subtitle', Index: 4, Codec: 'subrip', Language: 'chi', DeliveryMethod: 'Embed', IsExternal: false}
+	];
+	beforeEach(() => {
+		isTizen.mockReturnValue(true);
+		canRenderEmbeddedPgsInBand.mockReturnValue(true);
+		getDeviceCapabilities.mockResolvedValue({});
+		api.getPlaybackInfo.mockResolvedValue({MediaSources: [{
+			Id: 'source', Container: 'mkv', SupportsDirectPlay: true, SupportsTranscoding: false,
+			MediaStreams: subtitles
+		}]});
+	});
+
+	test('reads PGS and SRT locally when the server cannot extract subtitles, retaining ASS native playback', async () => {
+		const result = await playback.getPlaybackInfo(movie.Id, {item: movie});
+		const [pgs, ass, srt] = result.subtitleStreams;
+		expect(pgs.inBand).toEqual({streamUrl: result.url, ordinal: 0});
+		expect(pgs.isEmbeddedNative).toBe(false);
+		expect(srt.inBandText).toEqual({streamUrl: result.url, ordinal: 2, language: 'chi'});
+		expect(srt.isEmbeddedNative).toBe(false);
+		expect(ass.inBandText).toBeNull();
+		expect(ass.isEmbeddedNative).toBe(true);
+	});
+
+	test('does not read an external subtitle or a non-Matroska file as MKV blocks', async () => {
+		api.getPlaybackInfo.mockResolvedValue({MediaSources: [{Id: 'source', Container: 'mp4', SupportsDirectPlay: true,
+			MediaStreams: [{...subtitles[2], IsExternal: true, DeliveryMethod: 'External'}]}]});
+		const result = await playback.getPlaybackInfo(movie.Id, {item: movie});
+		expect(result.subtitleStreams[0].inBandText).toBeNull();
+		expect(result.subtitleStreams[0].inBand).toBeNull();
 	});
 });
 
