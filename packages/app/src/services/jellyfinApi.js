@@ -12,6 +12,7 @@ import {createPlexApi, withEveryMethod} from './plexApi';
 import {createSiloApi, withEverySiloMethod} from './siloApi';
 import {onSiloTokensRotated, siloServerKey, siloSessionFor, siloSessionOfAccount} from './siloSession';
 import {isPlexServer, registerPlexServer} from '../utils/plexUrls';
+import {BOOKS_ENABLED, personalLibraries} from '../utils/personalBuild';
 import {registerSiloServer} from '../utils/siloUrls';
 const APP_VERSION = packageJson.version;
 
@@ -159,7 +160,7 @@ const PEOPLE_SEARCH_TIMEOUT_MS = 10000;
 // The playback information dialog waits on this, so it gives up quickly and goes without.
 const OWN_SESSION_TIMEOUT_MS = 1500;
 // Emby's search has never asked for audiobooks, so only Jellyfin's does.
-const searchTypes = (kind) => `Book,${kind === 'jellyfin' ? 'AudioBook,' : ''}Movie,Series,Season,Episode,Video,MusicVideo,Trailer,Program,Playlist,MusicArtist,MusicAlbum,Audio,PhotoAlbum,Photo,BoxSet,Folder`;
+const searchTypes = (kind) => `${BOOKS_ENABLED ? 'Book,' : ''}${kind === 'jellyfin' ? 'AudioBook,' : ''}Movie,Series,Season,Episode,Video,MusicVideo,Trailer,Program,Playlist,MusicArtist,MusicAlbum,Audio,PhotoAlbum,Photo,BoxSet,Folder`;
 export const HOME_ROW_ITEM_FIELDS = 'DateCreated,PremiereDate,PrimaryImageAspectRatio,OfficialRating,Overview,Genres,GenreItems,ProductionYear,RunTimeTicks,CommunityRating,CriticRating,ProviderIds,ImageTags,BackdropImageTags,ParentBackdropImageTags,ParentBackdropItemId,ParentThumbItemId,ParentLogoItemId,ParentLogoImageTag,SeriesPrimaryImageTag,ParentPrimaryImageTag,SeriesName,SeriesId,ParentIndexNumber,IndexNumber,UserData,AlbumArtist,AlbumId,AlbumPrimaryImageTag';
 
 // The home Next Up row asks the server for a window instead of the whole watch
@@ -220,8 +221,8 @@ const readQueryFilters = (send, userId, parentId, includeItemTypes) => {
 
 // Routes through the webOS TLS proxy fallback (secureFetch) so Let's-Encrypt
 // servers work on old TVs whose CA store rejects them; native fetch elsewhere.
-const fetchWithTimeout = (url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) =>
-	mediaServerQueue.run(() => platformFetch(url, options, timeoutMs));
+const fetchWithTimeout = (url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS, priority = 0) =>
+	mediaServerQueue.run(() => platformFetch(url, options, timeoutMs), priority);
 export const getDeviceId = () => deviceId;
 
 // Builds the query string by hand to avoid URLSearchParams issues, leaving out empty values.
@@ -264,7 +265,7 @@ const request = async (endpoint, options = {}) => {
 				...options.headers
 			},
 			body: options.body ? JSON.stringify(options.body) : undefined
-		}, options.timeoutMs || DEFAULT_TIMEOUT_MS);
+		}, options.timeoutMs || DEFAULT_TIMEOUT_MS, options.priority || 0);
 	} catch (err) {
 		const typed = new Error(err.message);
 		typed.connectionType = classifyError(err);
@@ -583,7 +584,7 @@ export const api = {
 
 	getLibraries: () => (serverType === 'emby'
 		? withoutHiddenViews(request(userRoutes.views()), request(`/Users/${currentUser}`))
-		: request(userRoutes.views())),
+		: request(userRoutes.views())).then((result) => ({...result, Items: personalLibraries(result?.Items || [])})),
 
 	getAllLibraries: () => request(`${userRoutes.views()}IncludeHidden=true`),
 
@@ -591,12 +592,12 @@ export const api = {
 
 	getLatestItems: (params = {}) => request(`${userRoutes.latest()}${toQuery(params)}`),
 
-	getItem: (itemId) => request(userRoutes.item(itemId)),
+	getItem: (itemId) => request(userRoutes.item(itemId), {priority: 1}),
 
 	getLocalTrailers: (itemId) => request(`/Items/${itemId}/LocalTrailers?userId=${currentUser}`),
 
 	getItemForDetail: (itemId) =>
-		request(`${userRoutes.item(itemId)}Fields=Overview,Genres,OfficialRating,BackdropImageTags,ParentBackdropImageTags,ParentBackdropItemId,ParentLogoItemId,ParentLogoImageTag,ProviderIds,RunTimeTicks,ProductionYear,Chapters,People,Studios,Taglines,RemoteTrailers,MediaSources,MediaSourceCount,CommunityRating,CriticRating`),
+		request(`${userRoutes.item(itemId)}Fields=Overview,Genres,OfficialRating,BackdropImageTags,ParentBackdropImageTags,ParentBackdropItemId,ParentLogoItemId,ParentLogoImageTag,ProviderIds,RunTimeTicks,ProductionYear,Chapters,People,Studios,Taglines,RemoteTrailers,MediaSources,MediaSourceCount,CommunityRating,CriticRating`, {priority: 1}),
 
 	getItemWithChapters: (itemId) => request(`${userRoutes.item(itemId)}Fields=Chapters`),
 
@@ -1208,7 +1209,7 @@ export const createApiForServer = (serverUrl, token, userId, serverTypeOverride 
 					...options.headers
 				},
 				body: options.body ? JSON.stringify(options.body) : undefined
-			}, options.timeoutMs || DEFAULT_TIMEOUT_MS);
+			}, options.timeoutMs || DEFAULT_TIMEOUT_MS, options.priority || 0);
 		} catch (err) {
 			const typed = new Error(err.message);
 			typed.connectionType = classifyError(err);
@@ -1237,7 +1238,7 @@ export const createApiForServer = (serverUrl, token, userId, serverTypeOverride 
 	return {
 		getLibraries: () => (serverTypeOverride === 'emby'
 			? withoutHiddenViews(serverRequest(serverUserRoutes.views()), serverRequest(`/Users/${userId}`))
-			: serverRequest(serverUserRoutes.views())),
+			: serverRequest(serverUserRoutes.views())).then((result) => ({...result, Items: personalLibraries(result?.Items || [])})),
 
 		getAllLibraries: () => serverRequest(`${serverUserRoutes.views()}IncludeHidden=true`),
 
@@ -1250,7 +1251,7 @@ export const createApiForServer = (serverUrl, token, userId, serverTypeOverride 
 
 		// UserData is named so a saved rating comes back when the title is reopened.
 		getItem: (itemId) =>
-			serverRequest(`${serverUserRoutes.item(itemId)}Fields=Overview,Genres,People,Studios,MediaSources,MediaStreams,ExternalUrls,ProviderIds,RemoteTrailers,Taglines,UserData`),
+			serverRequest(`${serverUserRoutes.item(itemId)}Fields=Overview,Genres,People,Studios,MediaSources,MediaStreams,ExternalUrls,ProviderIds,RemoteTrailers,Taglines,UserData`, {priority: 1}),
 
 		getItemMediaInfo: (itemId) =>
 			serverRequest(`${serverUserRoutes.item(itemId)}Fields=MediaSources,MediaStreams`),

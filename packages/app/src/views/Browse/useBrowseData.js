@@ -2,6 +2,7 @@ import {useCallback, useEffect, useMemo, useReducer, useRef, useState} from 'rea
 import {retainPermitted} from '../../services/libraryScope';
 import {isKidsMode, mergesContinueWatchingNextUp} from '../../utils/kidsMode';
 import {isLiveTvLibrary, librariesForNav} from '../../utils/liveTvLibrary';
+import {IS_BU8000_BUILD, personalLibraries} from '../../utils/personalBuild';
 import $L from '@enact/i18n/$L';
 
 import {getLogoUrl} from '../../utils/helpers';
@@ -45,7 +46,7 @@ const emptyRowAfter = (label, err) => {
 };
 
 // The libraries the rows are read from.
-const rowLibraries = (libs, latestItemsExcludes, settings) => libs.filter(lib => {
+const rowLibraries = (libs, latestItemsExcludes, settings) => personalLibraries(libs).filter(lib => {
 	if (EXCLUDED_COLLECTION_TYPES.includes(lib.CollectionType?.toLowerCase())) {
 		return false;
 	}
@@ -147,6 +148,10 @@ const useBrowseData = ({
 
 	const fetchFreshFeaturedItems = useCallback(async (fallbackItems = null) => {
 		const s = settingsRef.current;
+		if (s.featuredBarStyle === 'off') {
+			memoryCache.featuredItems = [];
+			return null;
+		}
 		const configKey = featuredConfigKey(s, unifiedMode);
 		// The bar already holds a set for these settings, and a new random draw would only reshuffle it.
 		if (memoryCache.featuredItems?.length > 0 && memoryCache.featuredConfigKey === configKey) {
@@ -484,6 +489,10 @@ const useBrowseData = ({
 		// already in hand, and a fresh draw only follows if the media bar settings changed.
 		// With nothing remembered there is still nothing to show until the request answers.
 		const primeFeaturedItems = async (remembered, rememberedConfigKey) => {
+			if (settingsRef.current.featuredBarStyle === 'off') {
+				memoryCache.featuredItems = [];
+				return;
+			}
 			if (remembered?.length) {
 				// Records which settings the bar's items were drawn for.
 				memoryCache.featuredItems = remembered;
@@ -523,7 +532,8 @@ const useBrowseData = ({
 			const releasedType = settings.recentlyReleasedSeriesType;
 			const rowConfigKey = (settings.mergeRecentRowsByType ? 'merged-recent' : 'per-library') +
 				(releasedType && releasedType !== 'series' ? `:${releasedType}` : '') +
-				(settings.hideWatchedInRecentRows === true ? ':hide-watched' : '');
+				(settings.hideWatchedInRecentRows === true ? ':hide-watched' : '') +
+				(IS_BU8000_BUILD ? ':bu8000-v1' : '');
 
 			if (hasDynamicRowConfig || unifiedMode) {
 				memoryCache.rowConfigKey = rowConfigKey;

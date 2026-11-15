@@ -21,6 +21,7 @@ import {openSiloSocket} from './siloSocket';
 import {platformFetch} from './secureFetch';
 import {trimSlash} from '../utils/plexUrls';
 import {plexMoonbaseBase} from './plexMoonbase';
+import {WATCH_PARTY_ENABLED} from '../utils/personalBuild';
 
 export const SILO_ROOM_PROTOCOL = 'silo.room.v2';
 const TICKS_PER_SECOND = 10000000;
@@ -1503,6 +1504,7 @@ export const createWatchParty = ({silo, moonbase = () => null, sync = syncPlay, 
 
 // The signed-in Silo profile's api, or null on any other server.
 const siloNow = () => {
+	if (!WATCH_PARTY_ENABLED) return null;
 	const serverUrl = getServerUrl();
 	const token = getApiKey();
 	const userId = getUserId();
@@ -1548,6 +1550,7 @@ const moonbaseCall = async (path, {method = 'GET', body, headers, timeoutMs = CA
 
 // The signed-in Jellyfin, Emby or Plex login, whose Moonbase may host parties. Silo keeps its own.
 const moonbaseNow = () => {
+	if (!WATCH_PARTY_ENABLED) return null;
 	const serverUrl = getServerUrl();
 	const token = getApiKey();
 	const userId = getUserId();

@@ -1,4 +1,4 @@
-import {useState, useEffect, useCallback, useRef, useMemo} from 'react';
+import {lazy, useState, useEffect, useCallback, useRef, useMemo} from 'react';
 import {isKidsMode, kidsModeSettings} from '../../utils/kidsMode';
 import {sectionVisibility} from '../../utils/detailSectionLayout';
 import $L from '@enact/i18n/$L';
@@ -67,25 +67,28 @@ import {featuredBook, readingOrder} from '../BookBrowse/bookScreens';
 import {loadBookSeries} from '../BookBrowse/useBookLibrary';
 import {useUserDataList} from '../../hooks/useUserDataSync';
 import {mergeCollectionWithMissing, mergeMissingByReleaseOrder} from './seerrMissingCollectionItems';
-import ClassicDetailScreen from './ClassicDetailScreen';
 import SpotlightDetailContent from './spotlight/SpotlightDetailContent';
-import NouveauDetailContent from './nouveau/NouveauDetailContent';
 import MinimalistDetailContent from './minimalist/MinimalistDetailContent';
-import StageDetailContent from './stage/StageDetailContent';
-import PremiereDetailContent from './premiere/PremiereDetailContent';
 import QuickLookDetailContent, {QuickLookFrame} from './quickLook/QuickLookDetailContent';
-import FrostDetailContent from './frost/FrostDetailContent';
 import {drawsStage} from './stage/stageRules';
-import PersonScreen from './PersonScreen';
 import PersonDisplayDialog from './PersonDisplayDialog';
 import {offersFavorite} from './personFavorite';
-import SeasonScreen from './SeasonScreen';
-import PlaylistScreen from './PlaylistScreen';
-import AlbumScreen from './AlbumScreen';
-import ArtistScreen from './ArtistScreen';
-import AudioTrackScreen from './AudioTrackScreen';
 
 import css from './Details.module.less';
+
+// The app panel owns Suspense. Opening a movie must not initialise every layout and
+// music/person screen; the current Minimalist layout and its Spotlight fallback stay ready.
+const ClassicDetailScreen = lazy(() => import('./ClassicDetailScreen'));
+const NouveauDetailContent = lazy(() => import('./nouveau/NouveauDetailContent'));
+const StageDetailContent = lazy(() => import('./stage/StageDetailContent'));
+const PremiereDetailContent = lazy(() => import('./premiere/PremiereDetailContent'));
+const FrostDetailContent = lazy(() => import('./frost/FrostDetailContent'));
+const PersonScreen = lazy(() => import('./PersonScreen'));
+const SeasonScreen = lazy(() => import('./SeasonScreen'));
+const PlaylistScreen = lazy(() => import('./PlaylistScreen'));
+const AlbumScreen = lazy(() => import('./AlbumScreen'));
+const ArtistScreen = lazy(() => import('./ArtistScreen'));
+const AudioTrackScreen = lazy(() => import('./AudioTrackScreen'));
 
 // Every style past Classic takes the same contract, so the setting only decides which of them
 // draws the screen.

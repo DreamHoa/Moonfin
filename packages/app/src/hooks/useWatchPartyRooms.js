@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import Spotlight from '@enact/spotlight';
 import {watchParty, mergePartyRooms, syncPlayGroupFrom} from '../services/siloWatchParty';
 import {listGroups} from '../services/syncPlay';
+import {WATCH_PARTY_ENABLED} from '../utils/personalBuild';
 
 // Anything can ask App to open the Watch Parties screen, the settings drawer and Home among them.
 const OPEN_EVENT = 'moonfin:watchParties';
@@ -40,6 +41,7 @@ export const useWatchTogetherReturn = (open, toPlayer) => {
 export const useWatchPartyBackend = (sessionKey) => {
 	const [state, setState] = useState({backend: null, available: false, checked: false, config: null});
 	useEffect(() => {
+		if (!WATCH_PARTY_ENABLED) return undefined;
 		let live = true;
 		const backend = watchParty.backend();
 		setState({backend, available: false, checked: !backend, config: null});
@@ -63,7 +65,7 @@ const useWatchPartyRooms = ({active, intervalMs = 60000, withSyncPlay = false}) 
 	const [rooms, setRooms] = useState(null);
 
 	useEffect(() => {
-		if (!active) return undefined;
+		if (!WATCH_PARTY_ENABLED || !active) return undefined;
 		let live = true;
 		const run = async () => {
 			if (document.hidden) return;

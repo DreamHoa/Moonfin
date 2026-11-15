@@ -21,6 +21,7 @@ import * as userDataSync from '../../services/userDataSync';
 import {useUserDataVersion} from '../../hooks/useUserDataSync';
 import {isStreamlessStaticSource, probedSources} from '../../utils/placeholderSource';
 import {mergeEpisodeCast, mergeEpisodePeople, resolveParentCast} from '../../utils/episodeCast';
+import {drawsMinimalist} from './minimalist/minimalistRules';
 
 // Everything the screen shows about one item. The item itself is fetched first and rendered
 // on its own, then the rows that hang off it fill in behind, because waiting for all of them
@@ -226,6 +227,7 @@ const useDetailsItem = ({itemId, initialItem, effectiveApi, effectiveServerUrl, 
 			try {
 				data = await withProbedSources(effectiveApi, await effectiveApi.getItemForDetail(itemId));
 			} catch (err) {
+				if (cancelled) return;
 				console.error('[Details] Error loading item', err);
 				setIsSeed(false);
 				setIsLoading(false);
@@ -290,6 +292,9 @@ const useDetailsItem = ({itemId, initialItem, effectiveApi, effectiveServerUrl, 
 
 			const bg = async () => {
 				let boxSetMembers = [];
+				// Minimalist video pages have no cast, collections or recommendations. Loading
+				// them anyway can scan every collection on an older server while nothing uses it.
+				const minimalistVideo = settingsRef.current?.detailScreenStyle === 'v5' && drawsMinimalist(data.Type);
 				if (data.Type === 'Series') {
 					// Nouveau, Minimalist, Stage, Premiere and Frost show one season's episodes at a time behind a
 					// selector. Asking for the whole run once and splitting it here beats a fetch per season,
@@ -302,6 +307,7 @@ const useDetailsItem = ({itemId, initialItem, effectiveApi, effectiveServerUrl, 
 						effectiveApi.getNextUp(1, itemId).catch(() => null),
 						wantsEpisodes ? effectiveApi.getEpisodes(itemId).catch(() => null) : null
 					]);
+					if (cancelled) return;
 					if (seasonsData) setSeasons(tagWithServerInfo(withoutBlockedItems(seasonsData.Items || [], fallbackRating)));
 					if (nextUpData?.Items?.length > 0 && nextUpRequest === nextUpRequestRef.current) setNextUp(tagWithServerInfo(nextUpData.Items));
 					if (episodesData) setSeriesEpisodes(tagWithServerInfo(withoutBlockedItems(episodesData.Items || [], fallbackRating)));
@@ -309,7 +315,7 @@ const useDetailsItem = ({itemId, initialItem, effectiveApi, effectiveServerUrl, 
 
 				if (data.Type === 'Season') {
 					const hasActors = Array.isArray(data.People) && data.People.some((p) => p.Type === 'Actor');
-					if (!hasActors && data.SeriesId) {
+					if (!minimalistVideo && !hasActors && data.SeriesId) {
 						resolveParentCast({apiClient: effectiveApi, seriesId: data.SeriesId}).then((parentActors) => {
 							if (cancelled || !parentActors?.length) return;
 							setCast(mergeEpisodeCast({episodeActors: data.People || [], parentActors}));
@@ -329,14 +335,16 @@ const useDetailsItem = ({itemId, initialItem, effectiveApi, effectiveServerUrl, 
 					const wantsWholeSeries = Boolean(data.SeriesId) &&
 						['v3', 'v5', 'v6', 'v7', 'v9'].indexOf(episodeStyle) >= 0 &&
 						sectionVisibility(settingsRef.current?.hiddenDetailSectionsTv)('moreEpisodes');
-					resolveParentCast({
-						apiClient: effectiveApi,
-						seasonId,
-						seriesId: data.SeriesId
-					}).then((parentActors) => {
-						if (cancelled || !parentActors?.length) return;
-						setCast(mergeEpisodePeople({episodePeople: data.People || [], parentActors}));
-					});
+					if (!minimalistVideo) {
+						resolveParentCast({
+							apiClient: effectiveApi,
+							seasonId,
+							seriesId: data.SeriesId
+						}).then((parentActors) => {
+							if (cancelled || !parentActors?.length) return;
+							setCast(mergeEpisodePeople({episodePeople: data.People || [], parentActors}));
+						});
+					}
 					const [seasonData, seriesData] = await Promise.all([
 						data.SeriesId && seasonId
 							? effectiveApi.getEpisodes(data.SeriesId, seasonId).catch(() => null)
@@ -397,10 +405,12 @@ const useDetailsItem = ({itemId, initialItem, effectiveApi, effectiveServerUrl, 
 
 				setPlayListsLoaded(true);
 
-				const needsSimilar = data.Type !== 'Person' && data.Type !== 'BoxSet' &&
+				if (cancelled) return;
+				const shows = sectionVisibility(settingsRef.current?.hiddenDetailSectionsTv);
+				const needsSimilar = !minimalistVideo && shows('moreLikeThis') && data.Type !== 'Person' && data.Type !== 'BoxSet' &&
 					data.Type !== 'MusicAlbum' && data.Type !== 'MusicArtist' && data.Type !== 'Playlist';
-				const needsExtras = ['Movie', 'Episode', 'Video', 'Season', 'Series'].includes(data.Type);
-				const needsBoxSet = data.Type === 'Movie' || data.Type === 'Video' || data.Type === 'Series';
+				const needsExtras = shows('extras') && ['Movie', 'Episode', 'Video', 'Season', 'Series'].includes(data.Type);
+				const needsBoxSet = !minimalistVideo && shows('collections') && ['Movie', 'Video', 'Series'].includes(data.Type);
 
 				// Moonfin is only asked where the server said it can score, since
 				// otherwise every open pays a failed request before the stock row.
@@ -454,6 +464,7 @@ const useDetailsItem = ({itemId, initialItem, effectiveApi, effectiveServerUrl, 
 					needsExtras ? effectiveApi.getSpecialFeatures(itemId).catch(() => null) : Promise.resolve(null),
 					needsExtras && data.PartCount > 1 ? effectiveApi.getAdditionalParts(itemId).catch(() => null) : Promise.resolve(null)
 				]);
+				if (cancelled) return;
 
 				if (similarResult?.data) {
 					setSimilar(tagWithServerInfo(withoutBlockedItems(similarResult.data.Items || [])));
@@ -467,6 +478,7 @@ const useDetailsItem = ({itemId, initialItem, effectiveApi, effectiveServerUrl, 
 					setExtras(tagWithServerInfo(withoutBlockedItems([...parts, ...(extrasData || []).filter(e => e.Id !== itemId).sort(compareFeatures)])));
 				}
 				const collections = await collectionsLookup;
+				if (cancelled) return;
 				for (const boxSet of collections) {
 					const colData = await effectiveApi.getItems({
 						ParentId: boxSet.Id,

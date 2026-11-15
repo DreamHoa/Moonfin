@@ -27,7 +27,7 @@ import MakdBanner from './MakdBanner';
 import GalleryBanner from './GalleryBanner';
 import AyaBanner from './AyaBanner';
 import BannerBar from './BannerBar';
-import WatchPartyRow, {WatchPartyAlert, useWatchPartyHomeRow} from '../../components/WatchPartyDialog/WatchPartyRow';
+import {WatchPartyRow, WatchPartyAlert, useWatchPartyHomeRow} from '../../components/personalPartyUi';
 import {watchParty} from '../../services/siloWatchParty';
 import {openWatchParties} from '../../hooks/useWatchPartyRooms';
 import {useSyncPlay} from '../../context/SyncPlayContext';
@@ -432,10 +432,10 @@ const Browse = ({
 	}, [mountedRows, scrollToRow]);
 
 	useEffect(() => {
-		if (isLoading || mountedRows >= filteredRows.length) return undefined;
+		if (!isVisible || isLoading || mountedRows >= filteredRows.length) return undefined;
 		const timer = setTimeout(() => setMountedRows((count) => count + 1), ROW_MOUNT_GAP_MS);
 		return () => clearTimeout(timer);
-	}, [isLoading, mountedRows, filteredRows.length]);
+	}, [isVisible, isLoading, mountedRows, filteredRows.length]);
 
 	useEffect(() => {
 		if (!isLoading && isVisible) markHomeReady();

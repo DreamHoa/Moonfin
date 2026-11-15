@@ -22,3 +22,7 @@ A reuse regression fails on .5; all 83 related tests pass on .6, including fresh
 
 2026-11-14 Stage decision: freeze further PGS patches. The scoped-index run removed repeated metadata requests, brought target timeline availability to 3.896s and valid pixels to 4.334s, and correctly cleared the canvas. However, a later 2.211-second composition was not drawn while the decoder reported index -1. Complete subtitle acceptance remains failed; the speedup is not evidence that all omissions are fixed. Investigate that fixed missing-composition case before any future subtitle redesign.
 Current next stages: verify actual HDR playback, then profile global UI responsiveness. Runtime subtitle probes have been removed. No further production code changes are included in this stage record.
+
+2026-11-15: UI optimisation is now a separate BU8000 build profile. See BU8000-performance.txt for
+the exact feature scope, device A/B observations, package identity and measurement limits. The
+existing subtitle implementation stays frozen; UI speed results do not change its acceptance status.

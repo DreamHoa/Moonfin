@@ -38,6 +38,7 @@ import {
 export {DEFAULT_HOME_ROWS, TV_TO_SERVER_ROW, SERVER_TO_TV_ROW};
 
 import {defaultSettings} from './defaultSettings';
+import {personalSettings} from '../utils/personalBuild';
 
 export {defaultSettings};
 
@@ -689,6 +690,7 @@ export const migrateKeyboardStyle = (stored) => {
 
 export function SettingsProvider({children}) {
 	const [settings, setSettings] = useState(defaultSettings);
+	const effectiveSettings = useMemo(() => personalSettings(settings), [settings]);
 	const [loaded, setLoaded] = useState(false);
 	const [themeCatalogVersion, setThemeCatalogVersion] = useState(0);
 	const serverCredsRef = useRef(null);
@@ -1274,7 +1276,7 @@ export function SettingsProvider({children}) {
 
 	return (
 		<SettingsContext.Provider value={{
-			settings,
+			settings: effectiveSettings,
 			loaded,
 			availableThemes,
 			activeThemeId,

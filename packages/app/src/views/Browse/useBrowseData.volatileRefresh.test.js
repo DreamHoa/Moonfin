@@ -90,6 +90,16 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe('refreshing Continue Watching and Next Up', () => {
+	test('a disabled featured bar does not draw random titles when restoring a home cache', async () => {
+		loadBrowseCache.mockImplementation(async () => ({...cacheAged(1), featuredItems: []}));
+		const random = jest.fn(empty);
+		const options = {...props('token-a', 'user-a'), api: {...api, getRandomItems: random}, settings: {featuredBarStyle: 'off'}};
+		const {result, unmount} = renderHook(() => useBrowseData(options));
+		await waitFor(() => expect(result.current.allRowData.length).toBeGreaterThan(0));
+		expect(random).not.toHaveBeenCalled();
+		expect(memoryCache.featuredItems).toEqual([]);
+		unmount();
+	});
 	test("rows the load just refreshed aren't fetched again when Home first shows", async () => {
 		const result = await loaded(10);
 		await waitFor(() => expect(getResumeItems).toHaveBeenCalledTimes(1));

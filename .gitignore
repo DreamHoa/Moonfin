@@ -37,3 +37,6 @@ packages/build-xbox/probe/media
 .DS_Store
 .vscode
 *.log
+
+# Private local TV profiling results, never publish server/user/session data.
+/bu8000-ui-*.json
