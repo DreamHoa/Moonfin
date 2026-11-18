@@ -39,6 +39,7 @@ export {DEFAULT_HOME_ROWS, TV_TO_SERVER_ROW, SERVER_TO_TV_ROW};
 
 import {defaultSettings} from './defaultSettings';
 import {personalSettings} from '../utils/personalBuild';
+import {BOOT_LOCALE_KEY, DEFAULT_UI_LANGUAGE, normalizeUiLanguage} from '../utils/uiLanguage';
 
 export {defaultSettings};
 
@@ -176,6 +177,7 @@ const surfaceRatingSources = {
 const subtitleWeight = {toServer: v => (v ? 700 : 400), fromServer: v => v >= 600};
 
 const VALUE_CONVERSIONS = {
+	uiLanguage: {fromServer: normalizeUiLanguage, toServer: normalizeUiLanguage},
 	watchPartyService: oneOf(['moonbase', 'syncplay']),
 	homeRowsPosterSize: {
 		toServer: v => POSTER_SIZES_TO_SERVER[v] || v,
@@ -670,7 +672,6 @@ export const markServerSyncInitialized = async (serverUrl) => {
 // App boots before the async settings store loads, and on webOS that store is
 // DB8 which the reload after a language change beats. Mirror the language into
 // localStorage synchronously so the next boot reads the chosen one.
-const BOOT_LOCALE_KEY = 'moonfin_uiLanguage';
 const persistBootLocale = (locale) => {
 	try {
 		if (locale) window.localStorage?.setItem(BOOT_LOCALE_KEY, locale);
@@ -713,6 +714,11 @@ export function SettingsProvider({children}) {
 					(key) => Object.prototype.hasOwnProperty.call(stored, key)
 				));
 				let migrated = false;
+				if ('uiLanguage' in stored) {
+					const language = normalizeUiLanguage(stored.uiLanguage) || DEFAULT_UI_LANGUAGE;
+					migrated = language !== stored.uiLanguage;
+					stored.uiLanguage = language;
+				}
 				const hasExplicitHomeRowsStyle = Object.prototype.hasOwnProperty.call(stored, 'homeRowsStyle');
 				const mergedHomeRows = mergeHomeRows(stored.homeRows, {
 					seasonal: stored.seasonalRowEnabled === true,
@@ -956,7 +962,7 @@ export function SettingsProvider({children}) {
 		if (!loaded) return;
 
 		try {
-			if (settings.experimentalTruehd) {
+			if (effectiveSettings.experimentalTruehd) {
 				window.localStorage?.setItem(EXPERIMENTAL_TRUEHD_KEY, 'true');
 			} else {
 				window.localStorage?.removeItem(EXPERIMENTAL_TRUEHD_KEY);
@@ -964,7 +970,7 @@ export function SettingsProvider({children}) {
 		} catch (e) {
 			void e;
 		}
-	}, [loaded, settings.experimentalTruehd]);
+	}, [loaded, effectiveSettings.experimentalTruehd]);
 
 	const availableThemes = useMemo(() => getAvailableThemeList(), [themeCatalogVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 	const activeThemeId = useMemo(() => {
@@ -980,10 +986,11 @@ export function SettingsProvider({children}) {
 	);
 
 	const updateSetting = useCallback((key, value) => {
-		if (key === 'uiLanguage') persistBootLocale(value);
+		const nextValue = key === 'uiLanguage' ? normalizeUiLanguage(value) || DEFAULT_UI_LANGUAGE : value;
+		if (key === 'uiLanguage') persistBootLocale(nextValue);
 		noteAnsweredSettings([key]);
 		setSettings(prev => {
-			const updated = {...prev, [key]: value};
+			const updated = {...prev, [key]: nextValue};
 			saveToStorage('settings', updated);
 			if (SYNCABLE_KEYS.includes(key)) queueProfilePush(updated, serverCredsRef, [key]);
 			return updated;
@@ -991,10 +998,13 @@ export function SettingsProvider({children}) {
 	}, []);
 
 	const updateSettings = useCallback((newSettings) => {
-		if ('uiLanguage' in newSettings) persistBootLocale(newSettings.uiLanguage);
+		const values = 'uiLanguage' in newSettings
+			? {...newSettings, uiLanguage: normalizeUiLanguage(newSettings.uiLanguage) || DEFAULT_UI_LANGUAGE}
+			: newSettings;
+		if ('uiLanguage' in values) persistBootLocale(values.uiLanguage);
 		noteAnsweredSettings(Object.keys(newSettings));
 		setSettings(prev => {
-			const updated = {...prev, ...newSettings};
+			const updated = {...prev, ...values};
 			saveToStorage('settings', updated);
 			const syncable = Object.keys(newSettings).filter(k => SYNCABLE_KEYS.includes(k));
 			if (syncable.length > 0) {
@@ -1017,6 +1027,7 @@ export function SettingsProvider({children}) {
 	}, []);
 
 	const resetSettings = useCallback(() => {
+		persistBootLocale(defaultSettings.uiLanguage);
 		setSettings(defaultSettings);
 		saveToStorage('settings', defaultSettings);
 	}, []);

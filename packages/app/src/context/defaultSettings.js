@@ -1,6 +1,7 @@
 // Split out from SettingsContext so it can be imported without dragging in the
 // platform storage layer, which a plain unit test cannot load.
 import {DEFAULT_HOME_ROWS} from '../utils/homeLayout';
+import {DEFAULT_UI_LANGUAGE} from '../utils/uiLanguage';
 
 export const defaultSettings = {
 	preferTranscode: false,
@@ -9,7 +10,7 @@ export const defaultSettings = {
 	maxBitrate: 0,
 	audioLanguage: '',
 	subtitleLanguage: '',
-	uiLanguage: 'en-US',
+	uiLanguage: DEFAULT_UI_LANGUAGE,
 	subtitleMode: 'default',
 	subtitleSize: 'medium',
 	subtitlePosition: 'bottom',

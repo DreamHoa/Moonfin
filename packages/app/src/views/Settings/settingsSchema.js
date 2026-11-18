@@ -1,5 +1,5 @@
 import $L from '@enact/i18n/$L';
-import {WATCH_PARTY_ENABLED, SEERR_ENABLED, BOOKS_ENABLED} from '../../utils/personalBuild';
+import {IS_BU8000_BUILD, WATCH_PARTY_ENABLED, SEERR_ENABLED, BOOKS_ENABLED} from '../../utils/personalBuild';
 import {isSignInPinEnabled} from '../../utils/signInPin';
 import {isTrickplayOn} from '../../utils/trickplayLayout';
 import {mediaPreviewMode, mediaPreviewSettings} from '../../utils/mediaPreviewMode';
@@ -984,8 +984,8 @@ export const SETTINGS_SCHEMA = [
 					{kind: KIND.TOGGLE, key: 'eac3Passthrough', label: () => $L('EAC3 Passthrough'), desc: () => $L('Bitstream E-AC-3, including Dolby Atmos (JOC).'), icon: 'surround_sound', when: whenWebOSPassthrough},
 					{kind: KIND.TOGGLE, key: 'dtsPassthrough', label: () => $L('DTS Core Passthrough'), desc: () => $L('Bitstream DTS audio to AVR only; requires receiver support and DTS source track'), icon: 'audiotrack', when: whenPassthrough},
 					{kind: KIND.TOGGLE, key: 'dtshdPassthrough', label: () => $L('DTS-HD MA Passthrough'), desc: () => $L('Bitstream DTS-HD, including DTS:X.'), icon: 'high_quality', when: whenPassthrough},
-					{kind: KIND.TOGGLE, key: 'truehdPassthrough', label: () => $L('TrueHD Passthrough'), desc: () => $L('Bitstream TrueHD, including Dolby Atmos.'), icon: 'graphic_eq', when: (ctx) => whenPassthrough(ctx) && !ctx.isWebOS},
-					{kind: KIND.TOGGLE, key: 'experimentalTruehd', label: () => $L('Experimental TrueHD Attempt'), desc: () => $L('May fall back to PCM, DD+, or AC3. Requires eARC + receiver. Not for TV speakers.'), icon: 'speaker', when: (ctx) => whenTruehdOptIn(ctx) && ctx.isTizen, onToggle: (ctx) => ctx.actions.toggleExperimentalTruehd()},
+					{kind: KIND.TOGGLE, key: 'truehdPassthrough', label: () => $L('TrueHD Passthrough'), desc: () => $L('Bitstream TrueHD, including Dolby Atmos.'), icon: 'graphic_eq', when: (ctx) => !IS_BU8000_BUILD && whenPassthrough(ctx) && !ctx.isWebOS},
+					{kind: KIND.TOGGLE, key: 'experimentalTruehd', label: () => $L('Experimental TrueHD Attempt'), desc: () => $L('May fall back to PCM, DD+, or AC3. Requires eARC + receiver. Not for TV speakers.'), icon: 'speaker', when: (ctx) => !IS_BU8000_BUILD && whenTruehdOptIn(ctx) && ctx.isTizen, onToggle: (ctx) => ctx.actions.toggleExperimentalTruehd()},
 					{kind: KIND.SECTION, id: 'audioAdvanced', label: () => $L('Advanced')},
 					{kind: KIND.OPTION, key: 'maxAudioChannels', label: () => $L('Max Audio Channels'), desc: () => $L('Configure the maximum channels of your audio setup. Multichannel streams exceeding this limit will downmix or transcode.'), options: getMaxAudioChannelsOptions, fallback: () => $L('Auto Detect'), icon: 'speaker_group', padded: true},
 					{

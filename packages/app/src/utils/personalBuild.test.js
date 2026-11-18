@@ -9,10 +9,10 @@ test('BU8000 removes only requested features, even with a previously enabled ser
 	process.env.REACT_APP_TV_PROFILE = 'bu8000';
 	jest.resetModules();
 	const {personalSettings, personalLibraries} = require('./personalBuild');
-	const saved = {syncplayEnabled: true, showSeerrButton: true, showLiveTvButton: true,
+	const saved = {syncplayEnabled: true, showSeerrButton: true, experimentalTruehd: true, showLiveTvButton: true,
 		featuredTrailerPreview: true, seasonalTheme: 'snow', maxBitrate: 0};
 	const actual = personalSettings(saved);
-	expect(actual).toMatchObject({...saved, syncplayEnabled: false, showSeerrButton: false});
+	expect(actual).toMatchObject({...saved, syncplayEnabled: false, showSeerrButton: false, experimentalTruehd: false});
 	expect(saved.syncplayEnabled).toBe(true);
 	const libraries = ['movies', 'tvshows', 'books', 'comics', 'music', 'livetv', 'audiobooks'].map((CollectionType) => ({CollectionType}));
 	expect(personalLibraries(libraries).map((entry) => entry.CollectionType)).toEqual(['movies', 'tvshows', 'music', 'livetv', 'audiobooks']);

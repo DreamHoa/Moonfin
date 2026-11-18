@@ -23,7 +23,7 @@ Moonfin is a Jellyfin, Emby, Plex and Silo client for Samsung Smart TVs (Tizen),
 
 ## Samsung BU8000 fork
 
-This fork includes a Tizen 6.5 profile tuned for the Samsung BU8000. It reduces background requests and navigation stalls, and adds recovery for skipped embedded MKV PGS subtitles during AVPlay Direct Play. The BU8000 profile omits books and comics, Watch Parties and SyncPlay, and Seerr. The feature list and release links below describe upstream Moonfin.
+This fork offers English and Simplified Chinese as interface languages. Its Tizen 6.5 profile for the Samsung BU8000 reduces background requests and navigation stalls and adds recovery for skipped embedded MKV PGS subtitles during AVPlay Direct Play. The BU8000 profile omits books and comics, Watch Parties and SyncPlay, Seerr, the bundled Japanese subtitle font, and the experimental eARC TrueHD option. The feature list and release links below describe upstream Moonfin.
 
 - [BU8000 项目进度](docs/bu8000-progress.md) records the current baseline, fixes, device results, and open issues.
 - [BU8000 注意事项与验收方法](docs/bu8000-notes.md) covers builds, subtitle troubleshooting, device checks, and redaction.
@@ -152,7 +152,7 @@ Contributions are welcome. Check the existing issues first, open an issue before
 
 To submit a change, fork the repo, create a feature branch, make your changes with clear commit messages, and open a pull request with a clear description.
 
-## Help translate Moonfin [here](https://translate.moonfin.io/projects/moonfin/smart-tv/)
+## Upstream Moonfin [translations](https://translate.moonfin.io/projects/moonfin/smart-tv/)
 
 <a href="https://translate.moonfin.io/projects/moonfin/smart-tv/">
   <img

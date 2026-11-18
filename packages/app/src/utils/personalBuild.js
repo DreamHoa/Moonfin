@@ -8,6 +8,7 @@ export const SEERR_ENABLED = !IS_BU8000_BUILD;
 // Do not save these overrides back to the shared server profile.
 export const personalSettings = (settings) => IS_BU8000_BUILD ? {
 	...settings,
+	experimentalTruehd: false,
 	syncplayEnabled: false,
 	syncplayAutoOpen: false,
 	showSyncPlayButton: false,

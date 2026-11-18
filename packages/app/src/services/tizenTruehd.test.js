@@ -38,6 +38,19 @@ describe('Experimental TrueHD on Tizen', () => {
 		expect(videoAudioCodecs(await getJellyfinDeviceProfile())).toContain('truehd');
 	});
 
+	test('BU8000 ignores an opt-in left by an older build', async () => {
+		const previousProfile = process.env.REACT_APP_TV_PROFILE;
+		process.env.REACT_APP_TV_PROFILE = 'bu8000';
+		window.localStorage.setItem(OPT_IN_KEY, 'true');
+		try {
+			expect((await getDeviceCapabilities()).truehd).toBe(false);
+			expect(videoAudioCodecs(await getJellyfinDeviceProfile())).not.toContain('truehd');
+		} finally {
+			if (previousProfile === undefined) delete process.env.REACT_APP_TV_PROFILE;
+			else process.env.REACT_APP_TV_PROFILE = previousProfile;
+		}
+	});
+
 	test('the opt-in takes effect once the cache is cleared, without a restart', async () => {
 		expect((await getDeviceCapabilities()).truehd).toBe(false);
 		window.localStorage.setItem(OPT_IN_KEY, 'true');

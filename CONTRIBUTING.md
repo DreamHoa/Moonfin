@@ -34,7 +34,7 @@ npm run build:vega        # Fire TV .vpkg
 - Run the tests before you push: `npm test --workspace @moonfin/app`.
 - Test on a real TV and say which make, model and OS version in the pull request. A retail Samsung can still be inspected through `sdb shell 0 debug` and a Fire TV stick exposes DevTools in a `--debug` build, both described on the Development page.
 - Keep each pull request to one change. A fix and an unrelated refactor are two pull requests.
-- Don't edit the translated `strings.json` files under `packages/app/resources/<locale>/` by hand. Weblate owns them and will overwrite your edits on its next sync. New English strings go in `packages/app/resources/strings.json`, and translations happen at [translate.moonfin.io](https://translate.moonfin.io/engage/smart-tv/).
+- New English strings go in `packages/app/resources/strings.json`. Maintain the fork's Simplified Chinese strings in `packages/app/resources/zh/strings.json`. Upstream manages its translations at [translate.moonfin.io](https://translate.moonfin.io/engage/smart-tv/).
 
 ## Pull requests
 

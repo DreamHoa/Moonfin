@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {getUiLanguageOptions} from './settingsOptions';
+import {normalizeUiLanguage} from '../../utils/uiLanguage';
 
 // The language picker, the ilib manifest, the enact locale list and the folders on disk
 // all have to name the same set. Any one of them drifting leaves a language that is
@@ -22,6 +23,24 @@ const offered = getUiLanguageOptions().map((option) => option.value);
 const translated = offered.filter((value) => value !== 'en-US');
 
 describe('ui language options', () => {
+	test('offers only English and Simplified Chinese', () => {
+		expect(getUiLanguageOptions()).toEqual([
+			{value: 'en-US', label: 'English (US)'},
+			{value: 'zh', label: '简体中文'}
+		]);
+	});
+
+	test.each([
+		['en-GB', 'en-US'],
+		['zh-CN', 'zh'],
+		['zh-Hant', 'zh'],
+		['yue-HK', 'zh'],
+		['fr', undefined],
+		[null, undefined]
+	])('normalizes a stored or synced locale %s to %s', (stored, locale) => {
+		expect(normalizeUiLanguage(stored)).toBe(locale);
+	});
+
 	test('every offered language has a strings file', () => {
 		const missing = translated.filter((value) => !fs.existsSync(path.join(RESOURCES, value, 'strings.json')));
 		expect(missing).toEqual([]);

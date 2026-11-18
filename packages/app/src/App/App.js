@@ -35,6 +35,7 @@ import {initVideo, cleanupVideoElement, setupVisibilityHandler, setupPlatformLif
 import {activateApp, exitApp, renewDevMode} from '../utils/appLifecycle';
 import {SettingsProvider} from '../context/SettingsContext';
 import {seedLanguagePreferences} from '../utils/languagePrefSeed';
+import {BOOT_LOCALE_KEY, DEFAULT_UI_LANGUAGE, normalizeUiLanguage} from '../utils/uiLanguage';
 import {seedHideWatched} from '../utils/hideWatchedRecentRows';
 import {shouldRun as shouldRunSetupWizard, beginRerun as beginSetupWizardRerun} from '../utils/setupWizardGate';
 import {syncNotificationPrefs} from '../services/notificationPrefs';
@@ -123,6 +124,8 @@ const PdfReader = process.env.REACT_APP_TV_PROFILE === 'bu8000' ? () => null : l
 
 import '../styles/perf-overrides.less';
 import css from './App.module.less';
+
+if (process.env.REACT_APP_TV_PROFILE !== 'bu8000') require('./optionalFonts.less');
 
 const partyRoom = (state) => state.room;
 
@@ -2827,44 +2830,21 @@ const AppContent = (props) => {
 	);
 };
 
-let storedLocale = 'en-US';
+let storedLocale = DEFAULT_UI_LANGUAGE;
 try {
-	const bootLocale = localStorage.getItem('moonfin_uiLanguage');
-	if (bootLocale) {
-		storedLocale = bootLocale;
-	} else {
-		const stored = JSON.parse(localStorage.getItem('moonfin_settings') || '{}');
-		storedLocale = stored.uiLanguage || 'en-US';
-	}
+	const bootLocale = localStorage.getItem(BOOT_LOCALE_KEY);
+	const stored = bootLocale || JSON.parse(localStorage.getItem('moonfin_settings') || '{}')?.uiLanguage;
+	storedLocale = normalizeUiLanguage(stored) || DEFAULT_UI_LANGUAGE;
 } catch (e) { /* use default */ }
 
-// Pre-populate ilib.data with the locale strings so loadData() finds them cached
-// and skips synchronous XHR, which fails silently on Tizen. Only the locale the
-// app boots into is fetched, since a language change reloads the app and bundling
-// every locale eagerly would add megabytes to main.js. ilib keys use underscores
-// and path segments, so pt-BR becomes strings_pt_BR.
-const localeContext = require.context('../../resources', true, /^\.[\/][^/]+\/strings\.json$/, 'lazy');
-
-// ilib merges root, then language, then language-region, so a regional locale
-// needs its base language loaded alongside it for anything the region file
-// leaves out.
-const localeChain = (locale) => {
-	const [language, region] = String(locale || '').split('-');
-	if (!language) return [];
-	return region ? [language, language + '-' + region] : [language];
-};
-
-export const localeStringsReady = Promise.all(
-	localeChain(storedLocale).map((dir) => {
-		const key = './' + dir + '/strings.json';
-		if (localeContext.keys().indexOf(key) === -1) return null;
-		return localeContext(key).then((strings) => {
-			ilib.data['strings_' + dir.replace('-', '_')] = strings.default || strings;
-		}, () => {
-			// A missing chunk just means that locale falls back to English.
-		});
+// Cache the Simplified Chinese catalog before the first render to avoid synchronous XHR on Tizen.
+export const localeStringsReady = storedLocale === 'zh'
+	? import('../../resources/zh/strings.json').then((strings) => {
+		ilib.data.strings_zh = strings.default || strings;
+	}, () => {
+		storedLocale = DEFAULT_UI_LANGUAGE;
 	})
-);
+	: Promise.resolve();
 
 const AppBase = (props) => (
 	<SettingsProvider>

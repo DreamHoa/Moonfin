@@ -458,8 +458,16 @@ async function main() {
 		}
 	}
 
-	if (!isBU8000) copyReaderAssets(DIST, success);
-	else success('BU8000: excluded book/comic reader engines and assets');
+	if (isBU8000) {
+		const unusedFonts = ['Literata-Regular.woff', 'Literata-SemiBold.woff', 'Literata-OFL.txt',
+			'NotoSansJP-Regular.woff2', 'NotoSansJP-OFL.txt'];
+		for (const font of unusedFonts) {
+			fs.rmSync(path.join(DIST, 'resources', 'fonts', font), {force: true});
+		}
+		success('BU8000: excluded book/comic reader engines and optional fonts');
+	} else {
+		copyReaderAssets(DIST, success);
+	}
 
 	// The renderer asks for this by name whenever a style names a font the file does not
 	// carry, and it throws the whole track away when it cant be fetched.

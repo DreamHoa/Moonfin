@@ -3,7 +3,7 @@
 export const EXPERIMENTAL_TRUEHD_KEY = 'moonfin.experimentalTruehd';
 
 export const isExperimentalTruehdEnabled = () => {
-	if (typeof window === 'undefined') return false;
+	if (process.env.REACT_APP_TV_PROFILE === 'bu8000' || typeof window === 'undefined') return false;
 	try {
 		return window.localStorage?.getItem(EXPERIMENTAL_TRUEHD_KEY) === 'true';
 	} catch {
