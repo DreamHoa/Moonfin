@@ -49,8 +49,12 @@ const find = (selector) => document.querySelector(selector);
 const focusCard = (index) => fireEvent.focus(document.querySelectorAll('.spottable')[index]);
 
 describe('ModernMediaRow', () => {
-	it('keeps the measured caption width on the next focused card before measuring again', () => {
+	it.each([24, 48])('keeps the measured caption width across focus changes at a %ipx root font', (fontSize) => {
 		Spotlight.getPointerMode.mockReturnValue(false);
+		const root = document.documentElement;
+		const previousFontSize = root.style.fontSize;
+		root.style.fontSize = `${fontSize}px`;
+		const expectedWidth = String(1000 / (fontSize / 24));
 		const frames = [];
 		const raf = jest.spyOn(window, 'requestAnimationFrame').mockImplementation(cb => {frames.push(cb); return frames.length;});
 		const {unmount} = draw();
@@ -59,17 +63,18 @@ describe('ModernMediaRow', () => {
 			Object.defineProperty(cards[0].parentNode.parentNode, 'clientWidth', {value: 1000});
 			focusCard(0);
 			act(() => frames.shift()());
-			expect(cards[0].getAttribute('data-details-width')).toBe('1000');
+			expect(cards[0].getAttribute('data-details-width')).toBe(expectedWidth);
 			focusCard(1);
 			// The new card must not first render a narrow caption and expand a frame later.
-			expect(cards[1].getAttribute('data-details-width')).toBe('1000');
+			expect(cards[1].getAttribute('data-details-width')).toBe(expectedWidth);
 			expect(cards[0].hasAttribute('data-details-width')).toBe(false);
 			act(() => frames.shift()());
-			expect(cards[1].getAttribute('data-details-width')).toBe('1000');
+			expect(cards[1].getAttribute('data-details-width')).toBe(expectedWidth);
 		} finally {
 			unmount();
 			raf.mockRestore();
 			Spotlight.getPointerMode.mockReturnValue(true);
+			root.style.fontSize = previousFontSize;
 		}
 	});
 

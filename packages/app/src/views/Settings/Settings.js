@@ -419,6 +419,13 @@ const Settings = ({ onBack, onLibrariesChanged, onRunSetupWizard, onSelectItem, 
 		clearCapabilitiesCache();
 	}, [settings.experimentalTruehd, updateSetting]);
 
+	// The Xbox profile keeps what it detected, so the next playback only follows the new
+	// choice once it is thrown away
+	const toggleXboxDolbyVision = useCallback(() => {
+		updateSetting('xboxDolbyVision', settings.xboxDolbyVision === false);
+		clearCapabilitiesCache();
+	}, [settings.xboxDolbyVision, updateSetting]);
+
 	const handleOptionSelect = useCallback(
 		(settingKey, value) => {
 			if (settingKey === '__themeSelection') {
@@ -448,6 +455,7 @@ const Settings = ({ onBack, onLibrariesChanged, onRunSetupWizard, onSelectItem, 
 		const result = await checkForUpdatesDetailed();
 		if (result.status === 'update') {
 			setUpdateCheckMessage($L('Version {version} is available').replace('{version}', result.latestVersion));
+			window.dispatchEvent(new CustomEvent('moonfin:show-update'));
 		} else if (result.status === 'current') {
 			setUpdateCheckMessage($L('You are on the latest version'));
 		} else {
@@ -1111,6 +1119,7 @@ const Settings = ({ onBack, onLibrariesChanged, onRunSetupWizard, onSelectItem, 
 		isTizen: isTizen(),
 		isVega: isVega(),
 		isXbox: isXbox(),
+		consoleDolbyVision: !!capabilities?.consoleDolbyVision,
 		serverUrl,
 		serverVersion,
 		availableThemes,
@@ -1160,6 +1169,7 @@ const Settings = ({ onBack, onLibrariesChanged, onRunSetupWizard, onSelectItem, 
 			openScreen,
 			resetRatingsSettings,
 			toggleExperimentalTruehd,
+			toggleXboxDolbyVision,
 			setSetting: updateSetting,
 			setSettings: updateSettings,
 			refreshPlugin,
@@ -1170,7 +1180,7 @@ const Settings = ({ onBack, onLibrariesChanged, onRunSetupWizard, onSelectItem, 
 			openDeviceProbe: canProbeDevice ? openDeviceProbe : null
 		}
 	}), [
-		settings, capabilities, seerr, achievements, romm, seerrLabel, isSeerr, hasLiveTv, posterLabelsAvailable, serverType, serverUrl, ratingsResetArmed, resetRatingsSettings, toggleExperimentalTruehd, updateSetting, updateSettings, refreshPlugin, calendarLibraries,
+		settings, capabilities, seerr, achievements, romm, seerrLabel, isSeerr, hasLiveTv, posterLabelsAvailable, serverType, serverUrl, ratingsResetArmed, resetRatingsSettings, toggleExperimentalTruehd, toggleXboxDolbyVision, updateSetting, updateSettings, refreshPlugin, calendarLibraries,
 		serverVersion, availableThemes, activeThemeId, openThemes, openThemeStore, openHomeRows,
 		openDetailButtons, openOsdButtons, openDetailMetadata, openDetailSections, openDiagnostics,
 		signInPin, toggleSignInPin, changeSignInPin, removeSignInPin, openKidsMode, openLibraries, openLibraryOrder, openParentalControls, openSubtitleDownloadLanguages, openTranscodeAudioCodecs, openQrLink, openRatingSources, openRowImageTypes, openExcludedGenres, openMediaBarLibraries,

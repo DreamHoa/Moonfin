@@ -41,7 +41,7 @@ import {applyResumeRewind, skipBackSeconds, skipForwardSeconds, zoomInternalFrom
 import {getZoomModeOptions} from '../Settings/settingsOptions';
 import {saveAudioPref, saveSubtitlePref} from '../../services/subtitlePrefs';
 import {getVolumeState, setMuted as setSystemMuted} from '../../services/systemVolume';
-import {resolveSeriesAudio} from './initialAudio';
+import {asServerAudioStream, directPlayAudio, resolveSeriesAudio} from './initialAudio';
 import {resolveInitialSubtitle} from './initialSubtitle';
 import {api as jellyfinApi, createApiForServer, getServerType, getServerUrl} from '../../services/jellyfinApi';
 import {getApiForItem} from '../../services/connectionPool';
@@ -55,6 +55,7 @@ import useLiveRecording from './useLiveRecording';
 import useHeldSeekStep from './useHeldSeekStep';
 import {createServerSeek} from './serverSeek';
 import useSiloStreamRenewal from './useSiloStreamRenewal';
+import useEndedOnServer from './useEndedOnServer';
 import useStreamReconnect from './useStreamReconnect';
 import {hasTrickplayPreview} from '../../components/TrickplayPreview';
 import {isTrickplayOn} from '../../utils/trickplayLayout';
@@ -153,7 +154,7 @@ const avplaySeek = (titleMs) => {
 	return seekStream(titleMs);
 };
 
-const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialSubtitleIndex, initialStartPositionTicks, initialQuality, forceTranscode, onEnded, onBack, onGuide, onRecordings, onPlayNext, onSelectPerson, audioPlaylist, videoQueue, liveTvChannels, onPausedChange, background, onBackground, slideshow}) => {
+const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialSubtitleIndex, initialStartPositionTicks, initialQuality, forceTranscode, onEnded, onBack, onEndedOnServer, askedItemId, onGuide, onRecordings, onPlayNext, onSelectPerson, audioPlaylist, videoQueue, liveTvChannels, onPausedChange, background, onBackground, slideshow}) => {
 	const {settings, updateSetting} = useSettings();
 	const {isInGroup, lastCommand} = useSyncPlay();
 	const syncPlayCommandRef = useRef(false);
@@ -298,6 +299,8 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		isBuffering: () => isBufferingRef.current || !avplayReadyRef.current // eslint-disable-line no-use-before-define
 	}), [syncPlaySample]);
 	const runTimeRef = useRef(0);
+	// The runtime the playback info gave, which prepare doesn't overwrite (a second or less counts as unknown)
+	const titleRunTimeRef = useRef(0);
 	const healthMonitorRef = useRef(null);
 	const unregisterAppStateRef = useRef(null);
 	const controlsTimeoutRef = useRef(null);
@@ -470,6 +473,8 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	// handleBack is defined further down, so the timer reaches it through a ref
 	// rather than forcing the whole player to be reordered.
 	const handleBackRef = useRef(null);
+	// Set once Back or an ended session closes the player, so only one of them leaves it.
+	const closingRef = useRef(false);
 	const {sleepMinutes, remainingSeconds: sleepRemainingSeconds, startSleepTimer} = useSleepTimer({
 		onExpire: () => handleBackRef.current?.(),
 		ticking: activeModal === 'sleep'
@@ -935,8 +940,10 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		// some firmware resets display state during prepare
 		applyDisplayWindow();
 
+		// A Silo copy's playlist only lists what Silo has produced so far, so AVPlay's duration is that, not the title's:
+		// the scrub bar would end there and a skip would stop short. The title's runtime stands, and its seeks go to Silo.
 		const durationMs = avplayGetDuration();
-		if (durationMs > 0) {
+		if (durationMs > 0 && !(streamTimeline.seeksThroughServer && titleRunTimeRef.current > 10000000)) {
 			setDuration(durationMs / 1000);
 			runTimeRef.current = Math.floor(durationMs * 10000);
 		}
@@ -1033,6 +1040,13 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		if (result.playMethod) setPlayMethod(result.playMethod);
 		setIsHdrContent(isHdrOutput(result.mediaSource, result.playMethod === playback.PlayMethod.Transcode));
 		if (result.playSessionId) playSessionRef.current = result.playSessionId;
+		// A replan can be another version, or know a runtime the first plan didn't, so it sets the title's length as
+		// loadMedia does before the new stream prepares.
+		if (result.runTimeTicks !== undefined) {
+			runTimeRef.current = result.runTimeTicks || 0;
+			titleRunTimeRef.current = runTimeRef.current;
+			setDuration((result.runTimeTicks || 0) / 10000000);
+		}
 		if (!await startAVPlayback(result.url, positionTicks, {playMethod: result.playMethod, mediaSource: result.mediaSource, shouldAbort})) return null;
 		playback.reportStart(positionRef.current);
 		playback.startProgressReporting(
@@ -1049,7 +1063,8 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 			try {
 				await restartFromResult(await playback.reanchorAt(ticks), ticks);
 			} catch (err) {
-				console.error('[Player] Seek through the server failed:', err);
+				// An admin ending the session closes the player, so it isn't a failed seek.
+				if (!playback.isEndedOnServer(err)) console.error('[Player] Seek through the server failed:', err);
 			}
 		});
 		return () => { streamTimeline.seekThroughServer = null; };
@@ -1509,6 +1524,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 			subtitleLoadGenRef.current++;
 			disposeTextSource();
 			const stillCurrent = () => generation === loadGenerationRef.current;
+			closingRef.current = false;
 			setIsLoading(true);
 			// A video taking over from music opens on its own screen, not the music player's.
 			setIsAudioMode((wasAudio) => wasAudio && (item?.MediaType === 'Audio' || item?.Type === 'Audio'));
@@ -1564,6 +1580,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 					setVideoAspectRatio(getVideoDisplayAspectRatio(r.mediaSource));
 					playSessionRef.current = r.playSessionId;
 					runTimeRef.current = r.runTimeTicks || 0;
+					titleRunTimeRef.current = runTimeRef.current;
 					setDuration((r.runTimeTicks || 0) / 10000000);
 					setAudioStreams(r.audioStreams || []);
 					setSubtitleStreams(r.subtitleStreams || []);
@@ -1591,7 +1608,12 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				const preferredAudio = rememberedAudio || selectPreferredAudioStream(result.audioStreams, settings);
 				const serverAudio = result.audioStreams?.find(s => s.index === result.defaultAudioStreamIndex);
 				const fileDefaultAudio = result.audioStreams?.find(s => s.isDefault);
-				const autoAudio = preferredAudio || serverAudio || fileDefaultAudio;
+				const autoPick = preferredAudio || serverAudio || fileDefaultAudio;
+				// A codec the user has the server convert is renegotiated below instead.
+				const autoAudio = result.playMethod === playback.PlayMethod.DirectPlay && !transcodesAudioCodec(settings, autoPick?.codec)
+					? await directPlayAudio(autoPick, result.audioStreams, result.selectedAudioStreamIndex,
+						(stream) => playback.canPlayAudioStreamNatively(asServerAudioStream(stream)))
+					: autoPick;
 
 				// A remux or transcode carries only the track the server built it around, so
 				// switching on the player cant reach any other one. Direct play gets the
@@ -1612,6 +1634,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 						applyPlaybackResult(result);
 						audioNegotiated = true;
 					} catch (err) {
+						if (playback.isEndedOnServer(err)) throw err;
 						console.error('[Player] Audio track negotiation failed:', err);
 					}
 				}
@@ -1785,6 +1808,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 						applyPlaybackResult(result);
 						burnInSubtitleRef.current = burnInPendingSub.index;
 					} catch (err) {
+						if (playback.isEndedOnServer(err)) throw err;
 						console.error('[Player] Burn in subtitle negotiation failed:', err);
 					}
 				}
@@ -1947,6 +1971,8 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 
 				console.log(`[Player] Loaded ${displayTitle} via ${result.playMethod} (AVPlay native)${isLiveTV ? ' [Live TV]' : ''}`);
 			} catch (err) {
+				// Silo's admin ended this title's session: the player closes with its own message, not an error.
+				if (playback.isEndedOnServer(err)) return;
 				console.error('[Player] Failed to load media:', err);
 				// A pre-roll that cant even load gets skipped, not surfaced.
 				const skipTo = isPreroll(item) ? nextInQueue(videoQueueRef.current, item) : null;
@@ -2082,6 +2108,8 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	// ==============================
 	// Controls Auto-hide
 	// ==============================
+	const showsPauseDescription = settings.showDescriptionOnPause && Boolean(item?.Overview) && !isAudioMode;
+
 	const showControls = useCallback((isModalOpen = activeModal) => {
 		if (!controlsVisibleRef.current && !isAudioMode && !isLiveTV) setFocusRow('progress');
 		setControlsVisible(true);
@@ -2091,13 +2119,14 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 		// Don't auto-hide controls in audio mode
 		if (!isAudioMode && !isModalOpen) {
 			controlsTimeoutRef.current = setTimeout(() => {
-				// Paused playback keeps its controls, like the other clients. Resuming
-				// goes through showControls and re-arms the timer.
-				if (isPausedRef.current) return;
+				// Paused playback keeps its controls unless the paused description is
+				// waiting for them to go. Resuming goes through showControls and re-arms
+				// the timer.
+				if (isPausedRef.current && !showsPauseDescription) return;
 				setControlsVisible(false);
 			}, settings.controlsHideDelay);
 		}
-	}, [activeModal, isAudioMode, isLiveTV, settings.controlsHideDelay]);
+	}, [activeModal, isAudioMode, isLiveTV, settings.controlsHideDelay, showsPauseDescription]);
 
 	const hideControls = useCallback(() => {
 		setControlsVisible(false);
@@ -2105,6 +2134,16 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 			clearTimeout(controlsTimeoutRef.current);
 		}
 	}, []);
+
+	// A pause with a description to show puts the controls away so it comes up at once.
+	useEffect(() => {
+		if (isPaused && showsPauseDescription && !scrubHoldRef.current.active) hideControls();
+	}, [hideControls, isPaused, showsPauseDescription]);
+
+	// A new item's load, or a pause that outlived the delay, leaves controls up with no hide timer.
+	useEffect(() => {
+		if (!isLoading && !isPaused && controlsVisibleRef.current) showControls();
+	}, [isLoading, isPaused]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	// No track indexes travel along. The session only records an index the
 	// viewer asked for, so a subtitle the player picked on its own reads as
@@ -2336,6 +2375,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 					return;
 				}
 			} catch (fallbackErr) {
+				if (playback.isEndedOnServer(fallbackErr)) return;
 				console.error('[Player] Transcode fallback failed:', fallbackErr);
 			}
 		}
@@ -2379,6 +2419,8 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 			}
 			return restarted;
 		} catch (err) {
+			// An admin ending the session closes the player, so nothing else is tried.
+			if (playback.isEndedOnServer(err)) return null;
 			console.error('[Player] Stream reload failed:', err);
 			return superseded() ? null : false;
 		}
@@ -2393,18 +2435,40 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	// Control Actions (AVPlay-based)
 	// ==============================
 	const teardownPlayback = useCallback(async () => {
-		loadGenerationRef.current++;
+		const generation = ++loadGenerationRef.current;
 		cancelNextEpisodeCountdown();
 		stopTimeUpdatePolling();
 		await playback.reportStop(positionRef.current);
+		// A load started while the stop was out already cleared the old pipeline and set up its own.
+		if (generation !== loadGenerationRef.current) return;
 		cleanupAVPlay();
 		avplayReadyRef.current = false;
 	}, [cancelNextEpisodeCountdown, stopTimeUpdatePolling]);
 
 	const handleBack = useCallback(async () => {
+		closingRef.current = true;
 		await teardownPlayback();
 		onBack?.();
 	}, [teardownPlayback, onBack]);
+
+	// An admin ended the Silo session: playback stops at once and the player closes, saying why. A reconnect under way
+	// gives up first, so it can't try again.
+	useEndedOnServer({
+		itemId: item?.Id,
+		askedItemId,
+		stop: () => {
+			reconnectRef.current?.end();
+			return teardownPlayback();
+		},
+		// A Back pressed while it stopped closes the player already.
+		close: () => {
+			if (closingRef.current) return false;
+			closingRef.current = true;
+			onBack?.();
+			return true;
+		},
+		onEndedOnServer
+	});
 
 	useSkipFailedTrack({error, background, item, hasNextTrack, handleNextTrack, handleBack});
 
@@ -2485,7 +2549,13 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 	// A live stream has no duration, so its rewind window bounds a seek instead.
 	const seekBoundsMs = useCallback(() => {
 		const live = liveWindowRef.current;
-		return live ? [live.start * 1000, live.edge * 1000] : [0, avplayGetDuration()];
+		if (live) return [live.start * 1000, live.edge * 1000];
+		// A Silo copy's AVPlay duration ends where its playlist does (see prepare), so its runtime bounds a seek, a
+		// second short of the end, which Silo has no stream to open at.
+		if (streamTimeline.seeksThroughServer && titleRunTimeRef.current > 10000000) {
+			return [0, titleRunTimeRef.current / 10000 - 1000];
+		}
+		return [0, avplayGetDuration()];
 	}, []);
 
 	// AVPlay keeps reporting the old spot until a seek lands, so skip prompts are held until it has.
@@ -2706,9 +2776,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				// track the set cant decode freezes the picture, so reload and let the
 				// server transcode instead
 				const target = (audioStreams || []).find((s) => s.index === index);
-				const playableNatively = !transcodesAudioCodec(settings, target?.codec) && await playback.canPlayAudioStreamNatively(target
-					? {Codec: target.codec, Profile: target.profile, Title: target.title, DisplayTitle: target.displayTitle, ChannelLayout: target.channelLayout, Channels: target.channels}
-					: null);
+				const playableNatively = !transcodesAudioCodec(settings, target?.codec) && await playback.canPlayAudioStreamNatively(asServerAudioStream(target));
 				if (!playableNatively) {
 					serverLogger.playback('Audio: track needs the server, reloading instead of switching natively', {
 						jellyfinIndex: index,
@@ -2742,7 +2810,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				await restartFromResult(result, currentPositionTicks);
 			}
 		} catch (err) {
-			console.error('[Player] Failed to change audio:', err);
+			if (!playback.isEndedOnServer(err)) console.error('[Player] Failed to change audio:', err);
 		}
 	}, [item, playMethod, closeModal, restartFromResult, audioStreams, settings]);
 
@@ -2783,6 +2851,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				try {
 					await reloadWithSubtitleIndex(-1);
 				} catch (err) {
+					if (playback.isEndedOnServer(err)) return;
 					console.error('[Player] Subtitle reload failed:', err);
 				}
 			}
@@ -2797,6 +2866,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 				try {
 					await reloadWithSubtitleIndex(index);
 				} catch (err) {
+					if (playback.isEndedOnServer(err)) return;
 					console.error('[Player] Subtitle reload failed:', err);
 				}
 			}
@@ -2844,6 +2914,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 						await reloadWithSubtitleIndex(index);
 						burnInSubtitleRef.current = index;
 					} catch (err) {
+						if (playback.isEndedOnServer(err)) return;
 						console.error('[Player] Burn in subtitle reload failed:', err);
 					}
 				}
@@ -3253,6 +3324,7 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 
 		setIsDownloadingRemoteSubtitle(true);
 		setRemoteSubtitleError(null);
+		const endedGeneration = playback.endedOnServerGeneration();
 		try {
 			await jellyfinApi.downloadRemoteSubtitle(item.Id, remoteSubtitleResults[index].id);
 
@@ -3290,6 +3362,10 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 			subtitleStreamsRef.current = refreshedSubtitleStreams;
 			await applySubtitleSelection(appeared.Index, refreshedSubtitleStreams, true);
 		} catch (err) {
+			if (playback.isEndedOnServer(err)) {
+				playback.heardEndedOnServer(err, endedGeneration);
+				return;
+			}
 			setRemoteSubtitleError(remoteSubtitleDownloadError(err));
 		} finally {
 			setIsDownloadingRemoteSubtitle(false);
@@ -3932,9 +4008,13 @@ const Player = ({item, resume, initialMediaSourceId, initialAudioIndex, initialS
 
 			{(reconnecting || reconnectingLabel || showBuffering) && <LoadingAnimationLayer label={reconnecting || reconnectingLabel || $L('Loading Stream...')} />}
 
-			{isPaused && settings.showDescriptionOnPause && item?.Overview && !isAudioMode && !activeModal && !controlsVisible && (
+			{isPaused && showsPauseDescription && !activeModal && !controlsVisible && (
 				<div className={css.pauseDescriptionOverlay}>
-					<div className={css.pauseDescriptionText}>{item.Overview}</div>
+					<div className={css.pauseDescription}>
+						<div className={css.pauseDescriptionLabel}>{$L('Paused')}</div>
+						<div className={css.pauseDescriptionTitle}>{item.SeriesName || item.Name}</div>
+						<div className={css.pauseDescriptionText}>{item.Overview}</div>
+					</div>
 				</div>
 			)}
 

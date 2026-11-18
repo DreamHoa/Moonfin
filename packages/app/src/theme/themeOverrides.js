@@ -74,6 +74,9 @@ import itemMenuCss from '../components/ItemContextMenu/ItemContextMenu.module.le
 import skeletonCss from '../components/Skeleton/Skeleton.module.less';
 import playlistSortFilterCss from '../components/PlaylistSortFilterBar/PlaylistSortFilterBar.module.less';
 import playbackInfoCss from '../views/Player/PlaybackInfoModal.module.less';
+import accountCss from '../components/AccountModal/AccountModal.module.less';
+import carouselCss from '../components/ProfileCarousel/ProfileCarousel.module.less';
+import coreDialogCss from '../components/CoreDialog/CoreDialog.module.less';
 
 const STYLE_ELEMENT_ID = 'moonfin-theme-overrides';
 
@@ -123,6 +126,7 @@ export const buildThemeOverrideCss = (theme, options = {}) => {
 	const inputBorder = toCssColor(c.inputBorder);
 	const rangeTrack = toCssColor(c.rangeTrack);
 	const rangeProgress = toCssColor(c.rangeProgress);
+	const rangeThumb = toCssColor(c.rangeThumb);
 	const badgeUnplayed = toCssColor(c.badgeUnplayed);
 	const badgeWatched = toCssColor(c.badgeWatched);
 	const onBadge = toCssColor(c.onBadge);
@@ -205,6 +209,8 @@ export const buildThemeOverrideCss = (theme, options = {}) => {
 	}
 	rule(`.${sidebarCss.sidebarItem}:hover, .${sidebarCss.libraryItem}:hover, .${navBarCss.navBtn}:hover`, `color: ${onSurface}; background: ${os(0.14)};`);
 	rule(`.${sidebarCss.sidebarItem}:focus, .${sidebarCss.libraryItem}:focus, .${navBarCss.navBtn}:focus`, `color: ${onSurfaceInk}; background: ${onSurface}; border-color: transparent; box-shadow: ${glowOr('none')};`);
+	rule(`.${navBarCss.userBtn}:hover, .${navBarCss.userBtn}:focus`, 'background: transparent; box-shadow: none;');
+	rule(`.${navBarCss.userBtn}::after`, `box-shadow: 0 0 0 4px ${focusColor};`);
 	rule(`.${sidebarCss.active}`, `color: ${onSurface}; background: ${accentA(0.24)};`);
 	rule(`.${navBarCss.active}`, `color: ${onSurface}; background: ${accentA(0.28)};`);
 	rule(`.${navBarCss.navPill}`, `border: ${b.navBorder ? `${b.navBorder.width}px solid ${toCssColor(b.navBorder.color)}` : 'none'};`);
@@ -333,7 +339,7 @@ export const buildThemeOverrideCss = (theme, options = {}) => {
 	rule(`.${settingsCss.toggleOn} .${settingsCss.toggleThumb}`, `background: ${onAccent};`);
 	rule(`.${settingsCss.sliderInactive}`, `background: ${rangeTrack};`);
 	rule(`.${settingsCss.sliderActive}`, `background: ${rangeProgress};`);
-	rule(`.${settingsCss.sliderThumb}`, `background: ${toCssColor(c.rangeThumb)};`);
+	rule(`.${settingsCss.sliderThumb}`, `background: ${rangeThumb};`);
 	rule(`.${settingsCss.sliderTick}`, `background: ${os(0.38)};`);
 	rule(`.${settingsCss.divider}`, `background: ${os(0.12)};`);
 	rule(`.${settingsCss.aboutVersion}`, `color: ${onSurface};`);
@@ -716,7 +722,7 @@ export const buildThemeOverrideCss = (theme, options = {}) => {
 	rule(`.${browseCss.galleryCreditLabel}`, `color: ${accent};`);
 	rule(`.${browseCss.galleryShimmer} span`, `background: ${os(0.1)};`);
 	rule(`.${skeletonCss.box}`, `background-color: ${theme.isGlass ? 'rgba(255, 255, 255, 0.16)' : os(0.14)};`);
-	rule(`.${browseCss.bannerCard}:focus`, `border-color: ${focusColor}; box-shadow: ${glowOr(`0 0 18px ${accentA(0.4)}`)};`);
+	rule(`.${browseCss.bannerCard}:focus`, `border-color: ${focusColor}; box-shadow: ${glowOr(`0 0 30px ${accentA(0.4)}`)};`);
 	rule(`.${browseCss.bannerGradient}`, `background: linear-gradient(to right, ${scrim(0.9)}, ${scrim(0)});`);
 	rule(`.${browseCss.bannerMeta}`, `color: ${os(0.75)};`);
 	rule(`.${browseCss.bannerDot}`, `background: ${os(0.4)};`);
@@ -761,10 +767,6 @@ export const buildThemeOverrideCss = (theme, options = {}) => {
 		rule(`.${cardCss.card}:focus .${cardCss.seerrBanner}`, 'border-width: 4px 4px 0;');
 	}
 
-	rule(`.${mediaCardCss.seerr5}`, `background: ${onSurface}; border-color: ${statusAvailable};`);
-	rule(`.${mediaCardCss.seerr4}`, `background: ${statusAvailable};`);
-	rule(`.${mediaCardCss.seerr3}`, `border-color: ${statusRequested};`);
-	rule(`.${mediaCardCss.seerr2}`, `background: ${onSurface}; border-color: ${statusPending};`);
 	rule(`.${modernCardCss.focusRing}`, `border-color: ${focusColor};`);
 	rule(`.${seerrDotCss.dot}`, `background: ${onBadge}; border-color: ${onBadge};`);
 	rule(`.${seerrDotCss.available}`, `border-color: ${statusAvailable}; color: ${statusAvailable};`);
@@ -830,6 +832,17 @@ export const buildThemeOverrideCss = (theme, options = {}) => {
 	if (player) {
 		rule(ring(player, ['liveBtn', 'chapterItem'], [':hover', ':focus']), `border-color: ${focusColor};`);
 		rule(`.${player.trackItem}:focus`, `background: ${accentA(0.3)};`);
+		// The seek bar in the theme's range colors, like core's osdSeekBarTheme; the focused thumb turns white and grows (platform sheets)
+		rule(`.${player.progressBar}`, `background: ${rangeTrack};`);
+		rule(`.${player.progressFill}`, `background: ${rangeProgress};`);
+		rule(`.${player.progressBuffered}`, `background: rgba(${toRgbTriplet(c.rangeTrack)}, 0.8);`);
+		rule(`.${player.seekIndicator}`, `background: ${rangeThumb};`);
+		rule(`.${player.progressBar}:focus .${player.seekIndicator}`, `background: #ffffff;`);
+		rule(`.${player.liveProgressFill}`, `background: ${accent};`);
+		// The Japanese face only covers kana and kanji, so the theme's face follows it for the rest of the line
+		if (theme.fontFamily) {
+			rule(`.${player.subtitleText}:lang(ja)`, `font-family: 'NotoSansJP', '${theme.id === 'neon_pulse' ? 'NeonPulseBody' : theme.fontFamily}', sans-serif;`);
+		}
 	}
 	if (playerOverlays) {
 		rule(ring(playerOverlays, ['offsetBtn', 'actionBtn', 'settingItem'], [':hover', ':focus']), `border-color: ${focusColor};`);
@@ -858,6 +871,55 @@ export const buildThemeOverrideCss = (theme, options = {}) => {
 		rule(`.${calendar.button}:focus, .${calendar.tab}:focus`, `background: ${onSurface} !important; border-color: ${focusColor}; color: ${inkOn(c.onSurface) === '0, 0, 0' ? 'rgba(0, 0, 0, 0.87)' : '#fff'};`);
 	}
 
+
+	// Switch User, drawn in the theme's accent like Core and Roku. The scrim, the initials
+	// colours and the red Sign Out All Users stay fixed there too. Login's user picker shares the
+	// carousel but isn't themed, so these stay inside the switcher.
+	const sw = (names) => names.map((name) => `.${accountCss.layer} .${name}`).join(', ');
+	// The scrim is dark whatever the theme, so a dark onSurface gives way to white there.
+	const swRgb = inkOn(c.onSurface) === '0, 0, 0' ? onSurfaceRgb : '255, 255, 255';
+	const sws = (a) => `rgba(${swRgb}, ${a})`;
+	// Same check as the focused buttons: white on the Moonfin cyan can't be read.
+	const badgeInk = contrastRatio(c.accent, c.onAccent) >= MIN_BUTTON_CONTRAST
+		? onAccent
+		: `rgba(${inkOn(c.accent)}, 0.92)`;
+	rule(sw([accountCss.screen, carouselCss.name]), `color: ${sws(1)};`);
+	rule(sw([accountCss.signedInAs, carouselCss.line]), `color: ${sws(0.65)};`);
+	rule(sw([carouselCss.avatar]), `background: ${sws(0.1)};`);
+	rule(sw([carouselCss.personIcon]), `color: ${sws(0.6)};`);
+	rule(sw([`${carouselCss.slot0} .${carouselCss.avatar}`]), `box-shadow: 0 0 0 ${rem(4)} rgba(0, 0, 0, 0.45), 0 0 0 ${rem(8)} ${sws(0.25)};`);
+	rule(sw([`${carouselCss.carousel}:focus .${carouselCss.slot0} .${carouselCss.avatar}`]), `box-shadow: 0 0 0 ${rem(4)} rgba(0, 0, 0, 0.45), 0 0 0 ${rem(8)} ${accent};`);
+	rule(sw([carouselCss.badgeActive]), `background-color: ${accent}; color: ${badgeInk};`);
+	rule(sw([carouselCss.lineAccent]), `color: ${accent};`);
+	rule(sw([carouselCss.dot]), `background: ${sws(0.3)};`);
+	rule(sw([carouselCss.dotOn]), `background: ${accent};`);
+	rule(sw([`${carouselCss.pill}:not(.${carouselCss.pillDanger})`]), `border-color: ${sws(0.2)}; background: ${sws(0.06)}; color: ${sws(0.85)};`);
+	rule(sw([`${carouselCss.pill}:not(.${carouselCss.pillDanger}):focus`]), `border-color: ${accent}; color: ${accent};`);
+	// Shared list dialogs and confirms (Remove User, Seerr, server messages), in Core's dialog
+	// colours, with the Settings pickers' shape and titles. Rows keep their own accent tint on
+	// focus. The scrim and the red destructive buttons stay fixed.
+	const cd = coreDialogCss;
+	rule(`.${cd.panel}`, `background: ${surfaceA(0.9)}; border-color: ${os(0.12)}; ${dialogShape}`);
+	rule(`.${cd.alert}`, `background: rgb(${surfaceRgb}); ${dialogShape}`);
+	rule(`.${cd.panel}, .${cd.title}, .${cd.alert}, .${cd.alertTitle}, .${cd.alertContent}`, `color: ${onSurface};`);
+	rule(`.${cd.subtitle}`, `color: ${os(0.54)};`);
+	// The Seerr cancel and swap confirms set their message in white, which a light surface would hide
+	rule(`.${cd.alert} .${seerrRequestCss.cancelMessage}`, `color: ${os(0.7)};`);
+	rule(`.${cd.divider}`, `background: ${os(0.08)};`);
+	rule(`.${cd.row}:focus`, `background: ${accentA(0.2)};`);
+	rule(`.${cd.rowLabel}`, `color: ${os(0.8)};`);
+	rule(`.${cd.row}:focus .${cd.rowLabel}`, `color: ${os(0.95)};`);
+	rule(`.${cd.rowDimmed} .${cd.rowLabel}, .${cd.rowDimmed}:focus .${cd.rowLabel}`, `color: ${os(0.5)};`);
+	rule(`.${cd.rowIcon}`, `color: ${os(0.38)};`);
+	rule(`.${cd.rowIconSelected}`, `color: ${accent};`);
+	rule(`.${cd.alertAction}:not(.${cd.alertActionDestructive})`, `color: ${accent};`);
+	rule(`.${cd.alertAction}:not(.${cd.alertActionDestructive}):focus`, `background: ${accentA(0.1)};`);
+	if (theme.textGlow.length) {
+		rule(`.${cd.title}, .${cd.alertTitle}`, `color: ${accent}; text-shadow: ${textGlow}; letter-spacing: 0.4px;`);
+	}
+	if (theme.fontFamily) {
+		rule(`.${cd.title}, .${cd.alertTitle}`, `font-family: '${theme.fontFamily}', sans-serif;`);
+	}
 	// Pixel themes square off every fixed radius.
 	if (theme.isPixel) {
 		rule([
@@ -865,7 +927,7 @@ export const buildThemeOverrideCss = (theme, options = {}) => {
 			`.${navBarCss.navPill}`, `.${navBarCss.navBtn}`,
 			`.${settingsCss.listItem}`, `.${settingsCss.listItemIcon}`, `.${settingsCss.valueBubble}`, `.${settingsCss.dialog}`, `.${panelCss.panel}`, `.${settingsCss.pageAlone}`,
 			`.${settingsCss.themeCard}`, `.${settingsCss.themeCardStripe}`, `.${settingsCss.input}`,
-			`.${settingsCss.actionButton}`, `.${settingsCss.settingsButtonPrimary}`, `.${settingsCss.playbackTimePreview}`, `.${searchCss.searchInputWrapper}`,
+			`.${settingsCss.actionButton}`, `.${settingsCss.settingsButtonPrimary}`, `.${settingsCss.playbackTimePreview}`, `.${searchCss.searchInputWrapper}`, `.${coreDialogCss.alertAction}`,
 			`.${settingsCss.syncCard}`, `.${settingsCss.syncTransferCard}`, `.${settingsCss.syncChip}`,
 			`.${detailsCss.poster}`, `.${detailsCss.btnAction}`, `.${detailsCss.nextUpCard}`,
 			`.${detailsCss.episodeCard}`, `.${detailsCss.chapterCard}`, `.${detailsCss.extraCard}`,

@@ -26,13 +26,13 @@ import * as remoteControl from '../services/remoteControl';
 import {isBackKey, KEYS, remoteShortcut} from '../utils/keys';
 import {drawsStage} from '../views/Details/stage/stageRules';
 import {QUICK_LOOK_ID} from '../views/Details/quickLook/quickLookRules';
-import {applyPerfTier} from '../utils/perfTier';
+import {applyPerfTier, smoothScrollingFor} from '../utils/perfTier';
 import {setSmoothScrolling} from '../utils/focusScroll';
 import {isLiveTvChannel, isLiveTvLibrary} from '../utils/liveTvLibrary';
 import {OLED_TUNING} from '../utils/oledMode';
 import {isTizen, isVega, isXbox} from '../platform';
 import {initVideo, cleanupVideoElement, setupVisibilityHandler, setupPlatformLifecycle} from '../services/video';
-import {activateApp, exitApp} from '../utils/appLifecycle';
+import {activateApp, exitApp, renewDevMode} from '../utils/appLifecycle';
 import {SettingsProvider} from '../context/SettingsContext';
 import {seedLanguagePreferences} from '../utils/languagePrefSeed';
 import {seedHideWatched} from '../utils/hideWatchedRecentRows';
@@ -41,7 +41,7 @@ import {syncNotificationPrefs} from '../services/notificationPrefs';
 import {getActiveServer} from '../services/multiServerManager';
 import {SeerrProvider, useSeerr} from '../context/SeerrContext';
 import {AchievementsProvider, useAchievements} from '../context/AchievementsContext';
-import {achievementIconPath} from '../views/Settings/achievements/achievementIcons';
+import {HOME_MATERIAL_ICON_PATHS} from '../components/icons/homeIconPaths';
 import {threadIsPhoto} from '../utils/achievementsModel';
 import {ServerMessagesProvider, useServerMessages} from '../context/ServerMessagesContext';
 import {SyncPlayProvider, useSyncPlay} from '../context/SyncPlayContext';
@@ -221,6 +221,10 @@ const AppContent = (props) => {
 
 	const [remoteMessage, setRemoteMessage] = useState(null);
 	const clearRemoteMessage = useCallback(() => setRemoteMessage(null), []);
+	// The player closed because an admin ended its Silo session, so the screen it returns to says why.
+	const showEndedOnServer = useCallback(() => {
+		setRemoteMessage({key: Date.now(), title: $L('Playback was ended on the Silo server.')});
+	}, []);
 	const unifiedMode = settings.unifiedLibraryMode && hasMultipleServers;
 
 	// Blocked ratings belong to whoever is signed in on this server.
@@ -255,24 +259,27 @@ const AppContent = (props) => {
 		clearUnlocks();
 		if (unlocks.muteDuringPlayback && panelIndex === PANELS.PLAYER) return;
 		const {badges} = unlocks;
-		if (unlocks.grouped && badges.length > 1) {
-			const top = badges.reduce((best, badge) => (badge.score > best.score ? badge : best));
-			const names = badges.slice(0, 3).map((badge) => badge.title).join(', ');
-			const more = badges.length - 3;
-			setBadgeToasts((queue) => [...queue, {
-				key: unlocks.key,
-				title: $L('{count} achievements unlocked').replace('{count}', String(badges.length)),
-				body: more > 0 ? `${names} ${$L('+{count} more').replace('{count}', String(more))}` : names,
-				icon: achievementIconPath(top.icon)
-			}]);
-			return;
-		}
-		setBadgeToasts((queue) => [...queue, ...badges.map((badge, index) => ({
-			key: `${unlocks.key}-${index}`,
-			title: $L('Achievement unlocked'),
-			body: badge.title,
-			icon: achievementIconPath(badge.icon)
-		}))]);
+		// The badge icons live with Settings, so they only load once something unlocks.
+		import('../views/Settings/achievements/achievementIcons').then(({achievementIconPath}) => {
+			if (unlocks.grouped && badges.length > 1) {
+				const top = badges.reduce((best, badge) => (badge.score > best.score ? badge : best));
+				const names = badges.slice(0, 3).map((badge) => badge.title).join(', ');
+				const more = badges.length - 3;
+				setBadgeToasts((queue) => [...queue, {
+					key: unlocks.key,
+					title: $L('{count} achievements unlocked').replace('{count}', String(badges.length)),
+					body: more > 0 ? `${names} ${$L('+{count} more').replace('{count}', String(more))}` : names,
+					icon: achievementIconPath(top.icon)
+				}]);
+				return;
+			}
+			setBadgeToasts((queue) => [...queue, ...badges.map((badge, index) => ({
+				key: `${unlocks.key}-${index}`,
+				title: $L('Achievement unlocked'),
+				body: badge.title,
+				icon: achievementIconPath(badge.icon)
+			}))]);
+		}).catch(() => {});
 	}, [unlocks, clearUnlocks, panelIndex]);
 
 	// A banner for a chat that got a message from someone else, one at a time. Held back over
@@ -286,7 +293,7 @@ const AppContent = (props) => {
 		key: `${incomingThread.conversationId}-${incomingThread.lastAt ? incomingThread.lastAt.getTime() : incomingThread.unreadCount}`,
 		title: $L('New message from {name}').replace('{name}', incomingThread.name),
 		body: threadIsPhoto(incomingThread) ? $L('Photo') : incomingThread.lastMessage,
-		icon: achievementIconPath('forum')
+		icon: HOME_MATERIAL_ICON_PATHS.forum
 	} : null;
 	const [selectedItem, setSelectedItem] = useState(null);
 	const [selectedLibrary, setSelectedLibrary] = useState(null);
@@ -406,10 +413,33 @@ const AppContent = (props) => {
 	const {updateInfo, formattedNotes, dismiss: dismissUpdate} = useVersionCheck(
 		isAuthenticated && settings.updateNotificationsEnabled !== false ? 3000 : null
 	);
+	// Once per launch, or later if someone turns it on, before anyone has to sign in.
+	const devModeRenewedRef = useRef(false);
+	useEffect(() => {
+		if (!settingsLoaded || devModeRenewedRef.current || settings.keepDevModeAlive === false) return;
+		devModeRenewedRef.current = true;
+		renewDevMode();
+	}, [settingsLoaded, settings.keepDevModeAlive]);
 	const {userId, record: signInPin, account: pinAccount, latest: latestSignInPin, save: saveSignInPin} = useSignInPin();
 	const pinSession = isAuthenticated && userId ? `${userId}:${pinCheckCount}` : null;
 	const pinPending = Boolean(pinSession) && pinPassed !== pinSession;
 	const isPinGateActive = pinPending && isSignInPinEnabled(signInPin) && pinRememberRead === pinSession;
+	const signInPinRef = useRef(signInPin);
+	signInPinRef.current = signInPin;
+	// A PIN set on another device while the app was away is only known to the server. One found there is kept,
+	// so the gate still asks for it if the server can't be reached when the gate checks again. An answer that
+	// arrives after the profile changed, or after another check started, belongs to neither and is dropped.
+	const pinSessionRef = useRef(pinSession);
+	pinSessionRef.current = pinSession;
+	const pinAddedElsewhereRef = useRef(null);
+	pinAddedElsewhereRef.current = async () => {
+		const session = pinSession;
+		const before = latestSignInPin();
+		const next = await refreshSignInPin(before, pinAccount);
+		if (pinSessionRef.current !== session || !isSignInPinEnabled(next)) return false;
+		if (next !== before) saveSignInPin(next);
+		return true;
+	};
 	// Until the server has said whether the account has a PIN, nothing behind the gate shows.
 	const isPinChecking = pinPending && !isPinGateActive && pinChecked !== pinSession;
 	const [pinKeyboardOpen, setPinKeyboardOpen] = useState(false);
@@ -686,8 +716,8 @@ const AppContent = (props) => {
 	}, [settings.performanceMode]);
 
 	useEffect(() => {
-		setSmoothScrolling(settings.smoothScrolling);
-	}, [settings.smoothScrolling]);
+		setSmoothScrolling(smoothScrollingFor(settings.smoothScrollingChoice));
+	}, [settings.smoothScrollingChoice, settings.performanceMode]);
 
 	// The surfaces are crushed on the theme itself, so all this has to do is tell
 	// the stylesheet which artwork boost to draw with.
@@ -852,10 +882,21 @@ const AppContent = (props) => {
 			// The app is held in the background until it activates, so a throw on the way
 			// there must not be allowed to skip it.
 			try {
-				releaseVideoElements();
-				// The player closes the way Back closes it, so the viewer lands where they were.
-				playerEndRef.current?.();
-				setPinCheckCount((count) => count + 1);
+				// Coming back leaves the app as it was, the player included. A profile behind a PIN is asked for it
+				// again, which takes the whole app down to the gate, so its player closes the way Back closes it.
+				// The player is left to let go of its video itself, since one released first reads as at the start
+				// and the stop it reports would wipe the resume position.
+				const askForPin = () => {
+					playerEndRef.current?.();
+					setPinCheckCount((count) => count + 1);
+				};
+				if (isSignInPinEnabled(signInPinRef.current)) {
+					askForPin();
+				} else {
+					pinAddedElsewhereRef.current?.().then((added) => {
+						if (added) askForPin();
+					});
+				}
 				recheckAccessRef.current?.();
 			} finally {
 				activateApp();
@@ -2213,8 +2254,9 @@ const AppContent = (props) => {
 							</SpottableButton>
 						</div>
 					</div>
+					{/* Inside the gate so the keyboard draws above the gate's backdrop, not under it. */}
+					<TVKeyboard />
 				</div>
-				<TVKeyboard />
 			</div>
 		);
 	}
@@ -2575,6 +2617,7 @@ const AppContent = (props) => {
 							onBackground={handlePlayerBackground}
 							onEnded={slideshowVideo ? slideshowCallbacks.onEnded : handlePlayerEnd}
 							onBack={slideshowVideo ? slideshowCallbacks.onExit : handlePlayerEnd}
+							onEndedOnServer={showEndedOnServer}
 							slideshow={playerSlideshow}
 							onGuide={handlePlayerGuide}
 							onRecordings={handlePlayerRecordings}
@@ -2717,13 +2760,13 @@ const AppContent = (props) => {
 			)}
 			{BookReader && (
 				<Suspense fallback={<LoadingSpinner />}>
-				<BookReader
-					item={reading.item}
-					archive={reading.reader.archive}
-					serverUrl={serverUrl}
-					accessToken={accessToken}
-					onClose={handleCloseReader}
-				/>
+					<BookReader
+						item={reading.item}
+						archive={reading.reader.archive}
+						serverUrl={serverUrl}
+						accessToken={accessToken}
+						onClose={handleCloseReader}
+					/>
 				</Suspense>
 			)}
 			<AdminMessageDialog
@@ -2769,14 +2812,14 @@ const AppContent = (props) => {
 			)}
 			{showSettingsPanel && (
 				<Suspense fallback={<LoadingSpinner />}>
-				<SettingsPanel
-					initialView={settingsInitialView}
-					onClose={handleCloseSettingsPanel}
-					onLibrariesChanged={fetchLibraries}
-					onRunSetupWizard={handleRunSetupWizard}
-					onSelectItem={handleSelectItemFromSettings}
-					hasLiveTv={hasLiveTv}
-				/>
+					<SettingsPanel
+						initialView={settingsInitialView}
+						onClose={handleCloseSettingsPanel}
+						onLibrariesChanged={fetchLibraries}
+						onRunSetupWizard={handleRunSetupWizard}
+						onSelectItem={handleSelectItemFromSettings}
+						hasLiveTv={hasLiveTv}
+					/>
 				</Suspense>
 			)}
 			<TVKeyboard />

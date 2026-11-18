@@ -3,6 +3,7 @@ import Spottable from '@enact/spotlight/Spottable';
 import {getImageUrl, toAbsoluteImageUrl} from '../../utils/helpers';
 import {useSettings} from '../../context/SettingsContext';
 import {SeerrSeasonDot} from '../seerr/SeerrStatusBadge';
+import SeerrStatusDot from '../seerr/SeerrStatusDot';
 import SeerrStatusBanner, {hasSeerrDot, seerrBadgeStyle, seerrTitleStatus} from '../seerr/SeerrStatusBanner';
 import {showsWatchedCheck} from '../../utils/playedState';
 import SeerrIcon from '../icons/SeerrIcon';
@@ -13,6 +14,7 @@ import LoopMarquee from '../LoopMarquee';
 import useItemMenuHold from '../../hooks/useItemMenuHold';
 import useImageReveal, {pendingArtStyle} from '../../hooks/useImageReveal';
 import {isUnownedSeerrTitle, seerrThumbUrl, seerrWideArtUrl, useTmdbThumbsAvailable} from '../../utils/tmdbThumb';
+import {rem} from '../../utils/rootScale';
 import {useMediaPreviewSlot} from './MediaPreviewContext';
 import {episodeArtwork, requestedArtwork} from './cardArtwork';
 
@@ -241,8 +243,10 @@ const MediaCard = ({item, serverUrl, cardType = 'portrait', rowImageType = 'post
 	// focused thumbnail alike, and the seerr genre cards use the same scale.
 	const genreLabelSize = Math.min(24, Math.max(14, cardWidth * (14 / 200)));
 	const sized = size || sizeMultiplier !== 1;
-	const sizeStyle = sized ? {width: cardWidth + 'px'} : undefined;
-	const imgSizeStyle = sized ? {height: cardHeight + 'px'} : undefined;
+	// A screen that hands over a size lays its cards out itself, so only the setting's sizes follow the UI scale.
+	const length = size ? (n) => n + 'px' : rem;
+	const sizeStyle = sized ? {width: length(cardWidth)} : undefined;
+	const imgSizeStyle = sized ? {height: length(cardHeight)} : undefined;
 	// Logos and studio art have to sit inside the card whole. Everything else takes
 	// the cover the stylesheet already applies, so it stays out of the inline style.
 	const fitStyle = imageType === 'logo' || item.Type === 'Studio' || item.Type === 'Network'
@@ -308,8 +312,8 @@ const MediaCard = ({item, serverUrl, cardType = 'portrait', rowImageType = 'post
 							<div className={`${css.seerrBadge} ${css.seerrMissing} ${seerrMarkLeft ? css.seerrLeft : ''}`}>
 								<SeerrIcon />
 							</div>
-						) : seerrStyle === 'badge' && item._seerr && [2, 3, 4, 5].includes(item.mediaInfo?.status) ? (
-							<div className={`${css.seerrBadge} ${css[`seerr${item.mediaInfo.status}`]}`} />
+						) : seerrStyle === 'badge' && item._seerr ? (
+							<SeerrStatusDot status={item.mediaInfo?.status} />
 						) : null}
 
 						<SeerrSeasonDot status={seerrStyle === 'badge' ? seerrSeasonStatus : null} />

@@ -69,6 +69,7 @@ export const defaultSettings = {
 	mediaSegmentAutoHide: 'off',
 	cinemaModeEpisodesEnabled: false,
 	xboxNativePlayer: true,
+	xboxDolbyVision: true,
 	xboxPassthrough: false,
 	trickPlayMode: 'single',
 	trickPlayPreviewScale: 30,
@@ -304,6 +305,8 @@ export const defaultSettings = {
 	bookFoldersAsSeries: false,
 	musicLibraryStyle: 'immersive',
 	hideBackdropsInLibraries: false,
+	hideLibraryWatchProgress: false,
+	hideLibraryUnwatchedCount: false,
 	useSeriesThumbnails: false,
 	// The server keys, as the other clients store them, so they sync as they are.
 	episodePreviewEnabled: false,
@@ -418,8 +421,9 @@ export const defaultSettings = {
 	// Calendar reminders are a phone feature.
 	calendarReminders: null,
 	performanceMode: 'auto',
-	// Kept on the TV, since the other clients have no such setting.
-	smoothScrolling: true,
+	// Kept on the TV, since the other clients have no such setting. Null follows the
+	// performance tier, see smoothScrollingFor.
+	smoothScrollingChoice: null,
 	keyboardStyle: 'docked',
 	focusBorderColor: '',
 	navbarOpacity: 50,
@@ -427,5 +431,7 @@ export const defaultSettings = {
 	// webOS TLS proxy fallback: when the WebView rejects a server's certificate
 	// (net::ERR_INSECURE_RESPONSE), allow the bundled Node service to fetch with
 	// certificate validation disabled. Off by default; local-only (not synced).
-	allowInsecureCerts: false
+	allowInsecureCerts: false,
+	// webOS only, and kept on the TV rather than synced.
+	keepDevModeAlive: true
 };

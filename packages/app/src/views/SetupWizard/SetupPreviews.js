@@ -34,7 +34,8 @@ import {applyOledMode} from '../../utils/oledMode';
 import {normalizeRatingStyle} from '../../utils/personalRating';
 import {rootScale} from '../../utils/rootScale';
 import {memoryCache} from '../Browse/browseCache';
-import {CAROUSEL_PANEL_SCRIM, homeRowSpacing} from '../../components/MediaCard/modernCardLayout';
+import {classicCardSize} from '../../components/MediaCard/MediaCard';
+import {CAROUSEL_PANEL_SCRIM, homeRowSpacing, modernCardMetrics} from '../../components/MediaCard/modernCardLayout';
 import {rowPeekHeight} from '../Browse/rowPeek';
 import {genreGlowRgb} from '../Browse/galleryGlow';
 import {DETAIL_ICON_PATHS} from '../Details/detailIcons';
@@ -692,13 +693,14 @@ const HomeRow = ({title, items, t, modern, shape = 'portrait', offset = 0, withF
 	);
 };
 
-// Card Size as a scale of Default, the size the rows are drawn at otherwise.
-const POSTER_SIZE_SCALE = {small: 0.8, default: 1, large: 1.2, xlarge: 1.4, grandparents: 2};
-
-// The poster and thumb heights the rows' cards draw at, in the card size being looked at.
+// The poster and thumb heights Home's own cards draw at in the card size being looked at, halved
+// for this half size screen.
 const rowCardHeights = (settings, modern) => {
-	const sizeScale = POSTER_SIZE_SCALE[settings.homeRowsPosterSize] || 1;
-	return {posterHeight: (modern ? 240 : 150) * ROW_SCALE * sizeScale, thumbHeight: 110 * ROW_SCALE * sizeScale};
+	const posterSize = settings.homeRowsPosterSize;
+	return {
+		posterHeight: (modern ? modernCardMetrics({posterSize}).imageHeight : classicCardSize('portrait', posterSize).height) / 2,
+		thumbHeight: classicCardSize('landscape', posterSize).height / 2
+	};
 };
 
 // [rows] are Home's own rows, each {id, title, items, shape}, drawn in place of the sample ones
@@ -1072,7 +1074,7 @@ const BannerBar = ({items, t}) => {
 	if (item.officialRating) parts.push(item.officialRating);
 	return (
 		<div style={{width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden'}}>
-			<div style={{padding: '0 16px 8px 16px', flexShrink: 0}}>
+			<div style={{padding: '0 24px 8px 24px', flexShrink: 0}}>
 				<div style={{position: 'relative', height: 320, borderRadius: 14, overflow: 'hidden'}}>
 					<Artwork url={item.backdropUrl} t={t} />
 					<div style={{...ABS_FILL, background: 'linear-gradient(to right, rgba(0, 0, 0, 0.902), rgba(0, 0, 0, 0))'}} />
@@ -1087,7 +1089,7 @@ const BannerBar = ({items, t}) => {
 						<div style={{marginTop: 6, fontSize: 12, fontWeight: 600, color: t.onSurfaceA(0.75)}}>
 							{parts.join('  ·  ')}
 						</div>
-						<PreviewRatings item={item} surface='mediaBar' compact />
+						<PreviewRatings item={item} surface='mediaBar' compact labels={false} badges={false} />
 					</div>
 					<div style={{position: 'absolute', top: 12, right: 16}}>
 						<Dots max={7} active={16} inactive={6} inactiveAlpha={0.4} gap={2} pillActive t={t} />
@@ -2596,7 +2598,7 @@ const PlayerControlsPreview = ({moment, hdr}) => {
 						<div style={{position: 'absolute', left: 48, top: 110, width: 460}}>
 							<div style={{...SHADOWED, fontSize: 13, fontWeight: 700, textTransform: 'uppercase'}}>{$L('Paused')}</div>
 							<div style={{...SHADOWED, marginTop: 8, fontSize: 32, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{item ? item.title : ''}</div>
-							<div style={{...SHADOWED, marginTop: 8, fontSize: 15, lineHeight: 1.4, ...clampLines(4)}}>{item ? item.overview : ''}</div>
+							<div style={{...SHADOWED, marginTop: 8, fontSize: 15, fontWeight: 500, lineHeight: 1.4, ...clampLines(8)}}>{item ? item.overview : ''}</div>
 						</div>
 					</div>
 				)}

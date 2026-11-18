@@ -27,6 +27,7 @@ const path = require('path');
 const zlib = require('zlib');
 const {LINT_DIRS, runLintGate} = require('../../../scripts/lint-gate');
 const {copyReaderAssets} = require('../../../scripts/reader-assets');
+const {applyOta} = require('../../../scripts/ota');
 
 const ROOT = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(ROOT, '..', '..');
@@ -624,6 +625,9 @@ async function main() {
 	// Step 6 & 7: Determine output filename and clean previous output
 	const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 	const version = pkg.version || '0.0.0';
+
+	// Tizen 2.4 lacks WebCrypto, and BU8000 has its own profile outside the standard Tizen update channel.
+	if (!isLegacy && !isBU8000) applyOta({dist: DIST, platform: 'tizen', version: appPkg.version, log});
 	const typeName = isBU8000 ? 'BU8000' : isLegacy ? 'Legacy' : isOblong ? 'Oblong' : 'Regular';
 	const wgtName = `Moonfin_Tizen_${typeName}_v${version}.wgt`;
 	const finalWgt = path.join(REPO_ROOT, wgtName);

@@ -296,13 +296,6 @@ export const getBookLibraryStyleOptions = () => [
 	{ value: 'bookstore', label: $L('Bookstore') }
 ];
 
-export const getKeyboardStyleOptions = () => [
-	{ value: 'native', label: $L('Native') },
-	{ value: 'classic', label: $L('Classic') },
-	{ value: 'glass', label: $L('Glass') },
-	{ value: 'docked', label: $L('Docked') }
-];
-
 export const getMusicLibraryStyleOptions = () => [
 	{ value: 'classic', label: $L('Classic') },
 	{ value: 'quickAccess', label: $L('Quick Access') },
@@ -346,6 +339,12 @@ export const getHomeRowSortOptions = () => [
 	{ value: 'CommunityRating', label: $L('Community Rating') }
 ];
 
+// Jellyfin lists studios by name only, so these are the orders the Studios row can give.
+export const getStudioSortOptions = () => [
+	{ value: 'SortName', label: $L('Name') },
+	{ value: 'Random', label: $L('Random') }
+];
+
 // Playlist and collection rows can also follow the curated arrangement
 export const getPlaylistCollectionSortOptions = () => [
 	{ value: 'PlaylistOrder', label: $L('Playlist Order') },
@@ -360,7 +359,7 @@ export const getGenresRowItemFilterOptions = () => [
 
 export const getRecommendationSystemSourceOptions = () => [
 	{ value: 'local', label: $L('Moonfin Recommends') },
-	{ value: 'server', label: $L('Jellyfin Recommends') },
+	{ value: 'server', label: $L('Server Recommends') },
 	{ value: 'online', label: $L('TMDb Similarity') },
 	{ value: 'hybrid', label: $L('Hybrid') }
 ];
