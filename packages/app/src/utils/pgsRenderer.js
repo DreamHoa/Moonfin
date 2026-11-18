@@ -58,9 +58,8 @@ class InBandPgsRenderer {
 		this.clock.offset = value;
 	}
 
-	/** True when a seek went back before the data libpgs holds, which only a new renderer fixes. */
 	needsRestart(time) {
-		return this.source.needsRestart(time + this.clock.offset);
+		return this.source.needsRestart(time + this.clock.offset, this.clock.time + this.clock.offset);
 	}
 
 	renderAtTimestamp(time) {
@@ -69,6 +68,13 @@ class InBandPgsRenderer {
 		const impl = this.renderer.implementation;
 		if (impl?.pgs?.updateTimestamps.length && impl.updateTimestamps !== impl.pgs.updateTimestamps) {
 			impl.invokeTimestampsUpdate();
+		}
+		if (impl?.pgs && impl.renderAtIndex && this.source.cueTimestampAt) {
+			// The container already tells us which set is active. A parsed set can
+			// render now even if libpgs has not yet parsed its next timestamp.
+			const timestamp = this.source.cueTimestampAt(time + this.clock.offset);
+			impl.renderAtIndex(impl.pgs.updateTimestamps.lastIndexOf(timestamp));
+			return;
 		}
 		this.renderer.renderAtTimestamp(time);
 	}
@@ -167,8 +173,8 @@ export const initPgsCanvasRenderer = async (canvasElement, subtitleStream) => {
 /** The canvas equivalent of the webOS in-band reader, driven by AVPlay's clock. */
 export const initPgsCanvasInBandRenderer = async (canvasElement, subtitleStream, startTime = 0) => {
 	if (!subtitleStream?.inBand || !canvasElement) return null;
-	window.__moonfinMkvBuild = '20261115.9-clear';
-	console.info('[Tizen MKV] PGS build 20261115.9-clear, start:', startTime);
+	window.__moonfinMkvBuild = '20261118.pgs-indexed-recovery';
+	console.info('[Tizen MKV] PGS build 20261118.pgs-indexed-recovery, start:', startTime);
 	const clock = {time: startTime, offset: 0};
 	let indexCache = inBandIndexes.get(subtitleStream.inBand);
 	if (!indexCache) {

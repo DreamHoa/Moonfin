@@ -36,7 +36,7 @@ test('feeds embedded PGS to libpgs without asking the server for a subtitle side
 	expect(createInBandPgsSource.mock.calls[0][0].getTime()).toBe(125);
 	expect(native.renderAtTimestamp).toHaveBeenCalledWith(125);
 	view.needsRestart(10);
-	expect(source.needsRestart).toHaveBeenCalledWith(10);
+	expect(source.needsRestart).toHaveBeenCalledWith(10, 125);
 	view.dispose();
 	expect(source.dispose).toHaveBeenCalled();
 	expect(native.dispose).toHaveBeenCalled();
@@ -59,6 +59,20 @@ test('publishes an already decoded timeline before drawing when libpgs progress 
 	view.renderAtTimestamp(5);
 	view.renderAtTimestamp(6);
 	expect(impl.invokeTimestampsUpdate).toHaveBeenCalledTimes(1);
+	view.dispose();
+});
+
+test('renders the indexed current set before a later set has been parsed', async () => {
+	const times = [5 * 90000];
+	source.cueTimestampAt = jest.fn(time => (time < 6 ? 5 : 6) * 90000);
+	const impl = {pgs: {updateTimestamps: times}, updateTimestamps: times, renderAtIndex: jest.fn()};
+	native.implementation = impl;
+	const view = await initPgsCanvasInBandRenderer({}, track, 5);
+	view.renderAtTimestamp(5.5);
+	expect(impl.renderAtIndex).toHaveBeenLastCalledWith(0);
+	view.renderAtTimestamp(6);
+	expect(impl.renderAtIndex).toHaveBeenLastCalledWith(-1);
+	expect(native.renderAtTimestamp).not.toHaveBeenCalled();
 	view.dispose();
 });
 
