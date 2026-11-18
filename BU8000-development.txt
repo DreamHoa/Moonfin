@@ -1,5 +1,8 @@
 BU8000 embedded PGS development record
 
+Historical notes through 2026-11-15. See docs/bu8000-progress.md for the current
+baseline and acceptance results, and docs/bu8000-notes.md for test procedures.
+
 2026-11-14: migrated the device-validated Litefin no-store policy to the same MKV subtitle Range fetch in Moonfin. Native video playback and the libpgs decoder are unchanged.
 Removed the unbounded outer per-cue retry added in the previous customization. The existing three-attempt request budget and body timeout remain; a persistently unavailable cue may be skipped so later subtitles can continue.
 Regression validation: two new tests failed before the fix; four related suites and 74 tests pass after it. Full build lint and production compilation passed.

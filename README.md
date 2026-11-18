@@ -21,6 +21,15 @@
 
 Moonfin is a Jellyfin, Emby, Plex and Silo client for Samsung Smart TVs (Tizen), LG Smart TVs (webOS), Fire TV sticks running Vega OS and Xbox consoles. One shared codebase powers every platform, with a video pipeline tuned for each, so you get hardware-accelerated playback, a UI designed around a remote instead of a mouse, and features that most TV clients leave out.
 
+## Samsung BU8000 fork
+
+This fork includes a Tizen 6.5 profile tuned for the Samsung BU8000. It reduces background requests and navigation stalls, and adds recovery for skipped embedded MKV PGS subtitles during AVPlay Direct Play. The BU8000 profile omits books and comics, Watch Parties and SyncPlay, and Seerr. The feature list and release links below describe upstream Moonfin.
+
+- [BU8000 项目进度](docs/bu8000-progress.md) records the current baseline, fixes, device results, and open issues.
+- [BU8000 注意事项与验收方法](docs/bu8000-notes.md) covers builds, subtitle troubleshooting, device checks, and redaction.
+
+Build the BU8000 package with `npm run build:bu8000`. Pass `-- --skip-tizen-cli` to produce an unsigned WGT for separate signing.
+
 ## Features
 
 - **Hardware-accelerated playback** through Samsung AVPlay, webOS Starfish, the Fire TV WebView and the Xbox console's own player, with direct play first and a transcode fallback only when needed.

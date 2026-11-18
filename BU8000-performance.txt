@@ -1,7 +1,7 @@
 Samsung BU8000 UI performance build — 2026-11-15
 
 Target and scope
-UA65BU8000GXXP, Tizen 6.5, Chromium 85. The TV's actual user agent and Samsung's specification agree:
+Samsung BU8000, Tizen 6.5, Chromium 85. The TV's actual user agent and Samsung's specification agree:
 https://developer.samsung.com/smarttv/develop/specifications/web-engine-specifications.html
 Follow-up: BU8000-rendering-audit.txt records the later rendering pass, its final render4 package,
 no-network focus comparison and remaining client stalls. The ui4 numbers below are historical.
