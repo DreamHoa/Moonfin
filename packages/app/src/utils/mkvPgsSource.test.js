@@ -513,9 +513,10 @@ describe('mkvPgsSource', () => {
 		const blockedStart = cluster.bodyStart + cue.relativePosition;
 		serveFile(file);
 		const fetchFile = global.fetch;
+		let failCue = true;
 		global.fetch = jest.fn(async (url, init) => {
 			const match = /bytes=(\d+)-(\d+)/.exec(init.headers.Range);
-			if (Number(match[1]) === blockedStart) return {status: 503};
+			if (failCue && Number(match[1]) === blockedStart) return {status: 503};
 			return fetchFile(url, init);
 		});
 		const source = openSource({lookaheadSeconds: 10});
@@ -526,6 +527,20 @@ describe('mkvPgsSource', () => {
 			const bytes = await Promise.race([readAll(source), new Promise(resolve => { timer = setTimeout(() => resolve(null), 1800); })]);
 			expect(bytes).not.toBeNull();
 			expect([...new Set(ptsOf(bytes))]).toEqual([1000 * 90, 3000 * 90]);
+			// A rewind can be inside the decoder's overall time range and still cross the hole.
+			expect(source.cueTimestampAt(0.5)).toBeUndefined();
+			expect(source.cueTimestampAt(1.999)).toBe(90000);
+			expect(source.cueTimestampAt(2)).toBe(180000);
+			expect(source.needsRestart(1.25, 3.5)).toBe(true);
+			expect(source.needsRestart(2.25, 3.5)).toBe(true);
+			expect(source.needsRestart(3, 4.5)).toBe(false);
+			expect(source.needsRestart(2, 1.5)).toBe(false);
+			failCue = false;
+			const replay = openSource({startTime: 1.25, getTime: () => 1.25, lookaheadSeconds: 10});
+			try {
+				expect(await replay.ready).toBe(true);
+				expect([...new Set(ptsOf(await readAll(replay)))]).toEqual([90000, 180000, 270000]);
+			} finally { replay.dispose(); }
 		} finally { clearTimeout(timer); source.dispose(); warn.mockRestore(); }
 	});
 
@@ -559,6 +574,29 @@ describe('mkvPgsSource', () => {
 		serveFile(buildFile({subtitleTimes: [1000], fillerBytes: 32}), {failFirstWith: 503});
 		const source = openSource();
 		expect(await source.ready).toBe(true);
+	});
+
+	test('recovers a temporarily unavailable future cue before it is needed', async () => {
+		const file = buildFile({subtitleTimes: [1000, 2000, 3000], fillerBytes: 32});
+		const header = parseHeader(file);
+		const ce = splitElement(file, header.segmentDataOffset + header.cuesOffset);
+		const cue = parseCues(file, ce.bodyStart, ce.bodyEnd - ce.bodyStart, 2)[1];
+		const cluster = splitElement(file, header.segmentDataOffset + cue.clusterPosition);
+		const blockedStart = cluster.bodyStart + cue.relativePosition;
+		serveFile(file);
+		const fetchFile = global.fetch;
+		let attempts = 0;
+		global.fetch = jest.fn(async (url, init) => {
+			if (init.headers.Range.startsWith(`bytes=${blockedStart}-`) && ++attempts <= 3) return {status: 503};
+			return fetchFile(url, init);
+		});
+		const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+		const source = openSource({lookaheadSeconds: 10});
+		try {
+			expect(await source.ready).toBe(true);
+			expect([...new Set(ptsOf(await readAll(source)))]).toEqual([90000, 180000, 270000]);
+			expect(attempts).toBe(4);
+		} finally { source.dispose(); warn.mockRestore(); }
 	});
 
 	test('reads past the prefetch window to finish its last display set before it is due', async () => {

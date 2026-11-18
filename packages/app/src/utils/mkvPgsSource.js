@@ -357,6 +357,7 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 	let compressionSettings = null;
 	const preparedUnits = new Map();
 	const unitReads = new Map();
+	const failedCues = new Set();
 	let lastDeliveredCue = -1;
 	const clusterDataOffsets = new Map();
 
@@ -376,12 +377,12 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 	};
 
 	// The deadline includes the body, which may stall after successful response headers.
-	const requestWithDeadline = (start, end) => new Promise((resolve, reject) => {
+	const requestWithDeadline = (start, end, timeoutMs = fetchTimeoutMs) => new Promise((resolve, reject) => {
 		const controller = typeof AbortController === 'undefined' ? null : new AbortController();
 		const timer = setTimeout(() => {
 			controller?.abort();
 			reject(new Error('range request timed out'));
-		}, fetchTimeoutMs);
+		}, timeoutMs);
 		requestRange(start, end, controller?.signal).then((bytes) => {
 			clearTimeout(timer);
 			resolve(bytes);
@@ -391,14 +392,19 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		});
 	});
 
-	const fetchRange = async (start, end) => {
+	const fetchRange = async (start, end, cueTimeMs) => {
 		for (let attempt = 1; ; attempt++) {
 			try {
 				return await requestWithDeadline(start, end);
 			} catch (err) {
 				const transient = !(err.status < 500);
 				if (!transient || disposed) throw err;
-				if (attempt >= FETCH_ATTEMPTS) throw Object.assign(err, {transient});
+				if (attempt >= FETCH_ATTEMPTS) {
+					// A future display set can still be recovered before it has to be published.
+					const remainingMs = cueTimeMs - getTime() * 1000 - POLL_INTERVAL_MS;
+					if (remainingMs > 0) return requestWithDeadline(start, end, Math.min(fetchTimeoutMs, remainingMs));
+					throw Object.assign(err, {transient});
+				}
 			}
 			await delay(RETRY_DELAY_MS);
 		}
@@ -436,8 +442,9 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 	};
 
 	const readAccessUnit = async (cue) => {
+		const timeMs = cue.time * timestampScale;
 		const blockStart = await clusterDataOffset(cue.clusterPosition) + cue.relativePosition;
-		const probe = await fetchRange(blockStart, blockStart + BLOCK_PROBE_BYTES - 1);
+		const probe = await fetchRange(blockStart, blockStart + BLOCK_PROBE_BYTES - 1, timeMs);
 		const element = readElementHeader(probe, 0);
 
 		// FFmpeg's muxer, which HandBrake uses, keeps a subtitle that has a duration in a
@@ -474,10 +481,10 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		} else {
 			// The probe already contains the first part of the payload. Fetch only the
 			// tail rather than requesting the same bytes a second time.
-			const tail = await fetchRange(blockStart + probe.length, blockStart + bodyEnd - 1);
+			const tail = await fetchRange(blockStart + probe.length, blockStart + bodyEnd - 1, timeMs);
 			bytes = concat([probe, tail]).subarray(dataOffset, bodyEnd);
 		}
-		return {timeMs: cue.time * timestampScale, bytes};
+		return {timeMs, bytes};
 	};
 
 	const toSupFrames = (unit) => {
@@ -502,11 +509,20 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 		return pending;
 	};
 
+	const cueIndexAt = (targetMs) => {
+		let left = 0;
+		let right = cues.length;
+		while (left < right) {
+			const middle = Math.floor((left + right) / 2);
+			if (cueMs(middle) <= targetMs) left = middle + 1;
+			else right = middle;
+		}
+		return left - 1;
+	};
+
 	// Put the cursor on the last cue at or before the target, including its clear composition.
 	const arm = (targetMs) => {
-		let index = 0;
-		while (index < cues.length && cueMs(index) <= targetMs) index++;
-		nextCue = Math.max(0, index - 1);
+		nextCue = Math.max(0, cueIndexAt(targetMs));
 		servedFromMs = cues.length ? Math.min(cueMs(nextCue), targetMs) : targetMs;
 	};
 
@@ -612,10 +628,13 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 			for (let j = 0; j < reads.length; j++) {
 				const frames = await reads[j];
 				if (disposed) return delivered;
+				const cueIndex = cues.indexOf(group[j]);
 				if (frames.length) {
 					controller.enqueue(concat(frames));
-					lastDeliveredCue = cues.indexOf(group[j]);
+					lastDeliveredCue = cueIndex;
 					delivered = true;
+				} else {
+					failedCues.add(cueIndex);
 				}
 			}
 		}
@@ -673,14 +692,26 @@ export const createInBandPgsSource = ({streamUrl, subtitleOrdinal, getTime, star
 	return {
 		readable,
 		ready,
-		/** True when the time moved back before the data libpgs holds, which only a new renderer can fix. */
-		needsRestart(timeSeconds) {
-			return timeSeconds * 1000 < servedFromMs - RESTART_TOLERANCE_MS;
+		cueTimestampAt(timeSeconds) {
+			const index = cueIndexAt(timeSeconds * 1000);
+			return index < 0 ? undefined : Math.round(cueMs(index) * SUP_PTS_UNITS_PER_MS) >>> 0;
+		},
+		needsRestart(timeSeconds, previousSeconds) {
+			const timeMs = timeSeconds * 1000;
+			if (timeMs < servedFromMs - RESTART_TOLERANCE_MS) return true;
+			if (!(timeMs < previousSeconds * 1000 - RESTART_TOLERANCE_MS)) return false;
+			// The decoder stream is append-only. A rewind into or before a skipped cue
+			// needs a fresh stream even when the surrounding timestamps are buffered.
+			for (const index of failedCues) {
+				if (index + 1 === cues.length || timeMs < cueMs(index + 1)) return true;
+			}
+			return false;
 		},
 		dispose() {
 			disposed = true;
 			preparedUnits.clear();
 			unitReads.clear();
+			failedCues.clear();
 			clusterDataOffsets.clear();
 			cues = [];
 		}
